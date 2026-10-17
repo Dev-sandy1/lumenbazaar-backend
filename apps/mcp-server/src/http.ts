@@ -13,6 +13,103 @@ import { createMcpServer, mcpToolSchemaDocument } from "./server.js";
 import { createMcpMetricsService, mcpMetricRoute, type McpMetricsService } from "./metrics.js";
 import { type McpToolCapabilities } from "./tools.js";
 
+// ---------------------------------------------------------------------------
+// CORS configuration
+// ---------------------------------------------------------------------------
+//
+// MCP Streamable HTTP requires browsers and hosted MCP clients to send custom
+// headers (Content-Type, Accept, Mcp-Session-Id, Mcp-Protocol-Version).
+// Without CORS headers those requests are blocked by browser preflight.
+//
+// Origin policy: wildcard (*) is intentionally NOT used as the default.
+// Mcp-Session-Id is a bearer credential and browsers will not send it with
+// credentials=include if the server replies with Access-Control-Allow-Origin: *.
+// The allowed-origin set is configured via MCP_ALLOWED_ORIGINS (comma-separated)
+// with a safe fallback of an empty set (no cross-origin access).
+//
+// Set MCP_ALLOWED_ORIGINS=* only for fully public, credential-free deployments.
+// ---------------------------------------------------------------------------
+
+const MCP_CORS_ALLOW_HEADERS =
+  "Content-Type, Accept, Mcp-Session-Id, Mcp-Protocol-Version, Authorization";
+const MCP_CORS_EXPOSE_HEADERS = "Mcp-Session-Id";
+const MCP_CORS_MAX_AGE = "600"; // 10 minutes
+
+/**
+ * Parse the MCP_ALLOWED_ORIGINS environment variable into a set of allowed
+ * origins.  Returns an empty set when the variable is absent or empty.
+ */
+export function parseCorsAllowedOrigins(envValue: string | undefined): ReadonlySet<string> {
+  if (envValue === undefined || envValue.trim() === "") return new Set();
+  return new Set(
+    envValue
+      .split(",")
+      .map((o) => o.trim())
+      .filter((o) => o.length > 0)
+  );
+}
+
+/**
+ * Resolve the CORS `Access-Control-Allow-Origin` value for a request.
+ *
+ * - If the allowed set contains `"*"` every origin is permitted (wildcard
+ *   response).
+ * - Otherwise the request `Origin` header is reflected only when it appears in
+ *   the configured set; absent or unrecognised origins receive no CORS header,
+ *   which causes the browser to block the request — this is the secure default.
+ */
+export function resolveCorsOrigin(
+  requestOrigin: string | undefined,
+  allowedOrigins: ReadonlySet<string>
+): string | null {
+  if (allowedOrigins.size === 0) return null;
+  if (allowedOrigins.has("*")) return "*";
+  if (requestOrigin !== undefined && allowedOrigins.has(requestOrigin)) return requestOrigin;
+  return null;
+}
+
+/**
+ * Write CORS response headers onto `response`.  Call this before writing the
+ * status line for every request that might come from a browser or hosted MCP
+ * client.
+ *
+ * Returns `true` when the request is an OPTIONS preflight that has been fully
+ * handled so the caller should not continue processing the request.
+ */
+export function applyCorsHeaders(
+  request: IncomingMessage,
+  response: ServerResponse,
+  allowedOrigins: ReadonlySet<string>
+): boolean {
+  const requestOrigin = Array.isArray(request.headers["origin"])
+    ? request.headers["origin"][0]
+    : request.headers["origin"];
+
+  const resolvedOrigin = resolveCorsOrigin(requestOrigin, allowedOrigins);
+
+  if (resolvedOrigin !== null) {
+    response.setHeader("access-control-allow-origin", resolvedOrigin);
+    response.setHeader("access-control-allow-headers", MCP_CORS_ALLOW_HEADERS);
+    response.setHeader("access-control-expose-headers", MCP_CORS_EXPOSE_HEADERS);
+    // Reflect credentials only when the origin is explicitly listed (not wildcard)
+    if (resolvedOrigin !== "*") {
+      response.setHeader("access-control-allow-credentials", "true");
+    }
+  }
+
+  if (request.method === "OPTIONS") {
+    if (resolvedOrigin !== null) {
+      response.setHeader("access-control-allow-methods", "GET, POST, DELETE, OPTIONS");
+      response.setHeader("access-control-max-age", MCP_CORS_MAX_AGE);
+    }
+    response.writeHead(204);
+    response.end();
+    return true; // preflight handled
+  }
+
+  return false;
+}
+
 export type McpHttpServerOptions = {
   host?: string;
   path?: string;
@@ -21,6 +118,8 @@ export type McpHttpServerOptions = {
   capabilityProvider?: () => Promise<McpToolCapabilities>;
   requestGuard?: McpHttpRequestGuard;
   metrics?: McpMetricsService;
+  /** Allowed CORS origins. Defaults to MCP_ALLOWED_ORIGINS env var. */
+  allowedOrigins?: ReadonlySet<string>;
 };
 
 export type McpHttpServerHandle = {
@@ -38,6 +137,7 @@ type McpHttpRouteOptions = {
   environment?: string;
   requestGuard?: McpHttpRequestGuard;
   metrics?: McpMetricsService;
+  allowedOrigins?: ReadonlySet<string>;
 };
 
 export class McpHttpRequestGuard {
@@ -104,6 +204,8 @@ export async function startMcpHttpServer(
     options.requestGuard ??
     new McpHttpRequestGuard(120, 60_000, 1024 * 1024, process.env.MCP_TRUST_PROXY === "true");
   const metrics = options.metrics ?? createMcpMetricsService();
+  const allowedOrigins =
+    options.allowedOrigins ?? parseCorsAllowedOrigins(process.env.MCP_ALLOWED_ORIGINS);
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: () => randomUUID()
   });
@@ -116,6 +218,7 @@ export async function startMcpHttpServer(
       capabilityProvider,
       requestGuard,
       metrics,
+      allowedOrigins,
       environment: config.lumenEnv
     }).catch(() => {
       sendJson(response, 500, {
@@ -169,6 +272,14 @@ export async function handleMcpHttpRequest(
   const requestPath = parseMcpRequestPath(request.url);
   const expectedPath = normalizePath(mcpPath);
   const metricRoute = mcpMetricRoute(requestPath, expectedPath);
+
+  // Apply CORS headers and fully handle OPTIONS preflight before any other
+  // processing, including the rate limiter (preflight is not a real request).
+  const allowedOrigins = options.allowedOrigins ?? new Set<string>();
+  if (applyCorsHeaders(request, response, allowedOrigins)) {
+    // OPTIONS preflight was fully handled; nothing more to do.
+    return;
+  }
 
   response.once("finish", () => {
     const result =
@@ -269,8 +380,8 @@ async function probeCapabilities(provider: McpHttpRouteOptions["capabilityProvid
   }
 }
 
-function methodNotAllowed(response: ServerResponse) {
-  response.setHeader("allow", "GET");
+function methodNotAllowed(response: ServerResponse, allow = "GET") {
+  response.setHeader("allow", allow);
   sendJson(response, 405, { ok: false, error: "method_not_allowed" });
 }
 

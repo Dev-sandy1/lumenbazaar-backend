@@ -13,11 +13,69 @@ type RouteContract = {
   requestBodyRequired?: boolean;
   response: SchemaObject;
   responseMediaType?: string;
+  /** Optional schema for a 503 Service Unavailable response (e.g. readiness endpoint). */
+  degradedResponse?: SchemaObject;
 };
 
 const jsonObject: SchemaObject = {
   type: "object",
   additionalProperties: true
+};
+
+const livenessResponse: SchemaObject = {
+  type: "object",
+  required: ["ok", "service", "app"],
+  additionalProperties: false,
+  properties: {
+    ok: { type: "boolean", enum: [true] },
+    service: { type: "string" },
+    app: { type: "string" }
+  }
+};
+
+const readinessCheckStatus: SchemaObject = {
+  type: "string",
+  enum: ["ready", "unavailable", "timeout", "not_configured", "not_required"]
+};
+
+const readinessCheck: SchemaObject = {
+  type: "object",
+  required: ["status"],
+  properties: {
+    status: readinessCheckStatus,
+    latencyMs: { type: "integer", minimum: 0, description: "Elapsed probe time in ms. Omitted when status is not_required or not_configured." },
+    reason: { type: "string", description: "Stable, generic reason code. Never includes raw error messages, hostnames, credentials, or stack traces." }
+  }
+};
+
+const readinessResponse: SchemaObject = {
+  type: "object",
+  required: ["ok", "environment", "checks", "capabilities"],
+  properties: {
+    ok: { type: "boolean", description: "true only when all required dependencies are ready." },
+    environment: { type: "string", enum: ["local", "testnet", "staging", "mainnet"] },
+    checks: {
+      type: "object",
+      required: ["database", "redis", "stellarRpc", "horizon", "signer", "migrations", "assets"],
+      properties: {
+        database: readinessCheck,
+        redis: readinessCheck,
+        stellarRpc: readinessCheck,
+        horizon: readinessCheck,
+        signer: readinessCheck,
+        migrations: readinessCheck,
+        assets: readinessCheck
+      }
+    },
+    capabilities: {
+      type: "object",
+      required: ["exact", "upto"],
+      properties: {
+        exact: { type: "boolean" },
+        upto: { type: "boolean" }
+      }
+    }
+  }
 };
 
 const errorResponse: SchemaObject = {
@@ -406,17 +464,18 @@ export const apiRouteContracts: RouteContract[] = [
     method: "get",
     path: "/health",
     operationId: "getHealth",
-    summary: "Return API process liveness.",
+    summary: "Liveness probe — returns 200 while the process is running. Performs no I/O.",
     tags: ["metadata"],
-    response: jsonObject
+    response: livenessResponse
   },
   {
     method: "get",
     path: "/ready",
     operationId: "getReadiness",
-    summary: "Return dependency readiness and usable payment capabilities.",
+    summary: "Readiness probe — actively checks all dependencies and returns 503 if any required dependency is unavailable.",
     tags: ["metadata"],
-    response: jsonObject
+    response: readinessResponse,
+    degradedResponse: readinessResponse
   },
   {
     method: "get",
@@ -752,7 +811,6 @@ export function buildOpenApiSpec() {
             contract.responseMediaType === "text/event-stream"
               ? "Server-sent event stream"
               : "Successful response",
-          description: "Successful response",
           headers: rateLimitHeaders,
           content: {
             [contract.responseMediaType ?? "application/json"]: {
@@ -760,6 +818,19 @@ export function buildOpenApiSpec() {
             }
           }
         },
+        ...(contract.degradedResponse === undefined
+          ? {}
+          : {
+              "503": {
+                description:
+                  "Service Unavailable. One or more required dependencies are not ready. Response body has the same shape as 200 with ok: false.",
+                content: {
+                  "application/json": {
+                    schema: contract.degradedResponse
+                  }
+                }
+              }
+            }),
         "429": {
           description:
             "Rate limit exceeded. The client must wait before retrying. See Retry-After header.",

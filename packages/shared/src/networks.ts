@@ -2,11 +2,28 @@ export const networkIds = ["stellar:testnet", "stellar:pubnet"] as const;
 
 export type NetworkId = (typeof networkIds)[number];
 
+/**
+ * Asset kind identifier: "usdc" for the official Stellar testnet USDC,
+ * "lbt" for the custom Lumen Bazaar test-only asset.
+ */
+export type AssetKind = "usdc" | "lbt";
+
 export type SupportedAsset = {
   code: string;
   issuer: string;
   contractId?: string;
   decimals: number;
+  /**
+   * Asset kind: "usdc" for official Stellar USDC, "lbt" for custom test-only asset.
+   * Used to distinguish between production-ready and test-only assets in output
+   * and to enforce asset selection rules (e.g., USDC default for exact testnet, LBT test-only).
+   */
+  kind?: AssetKind;
+  /**
+   * True if this asset is a custom test-only asset and should be clearly labeled as such.
+   * When true, asset must never be reported as "USDC" or production-ready.
+   */
+  isTestOnly?: boolean;
 };
 
 export type NetworkConfig = {

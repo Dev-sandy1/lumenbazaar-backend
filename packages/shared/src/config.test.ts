@@ -148,4 +148,114 @@ describe("loadConfig", () => {
       loadConfig({ STELLAR_TESTNET_USDC_CONTRACT_ID: "" }).networks["stellar:testnet"].assets[0]
     ).not.toHaveProperty("contractId");
   });
-});
+
+  it("defaults to official testnet USDC when TESTNET_ASSET is not set or is 'usdc'", () => {
+    const config1 = loadConfig({});
+    const config2 = loadConfig({ TESTNET_ASSET: "usdc" });
+
+    const officialUsdcIssuer = "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5";
+    expect(config1.networks["stellar:testnet"].assets[0]).toMatchObject({
+      code: "USDC",
+      issuer: officialUsdcIssuer,
+      kind: "usdc",
+      isTestOnly: false
+    });
+    expect(config2.networks["stellar:testnet"].assets[0]).toMatchObject({
+      code: "USDC",
+      issuer: officialUsdcIssuer,
+      kind: "usdc",
+      isTestOnly: false
+    });
+  });
+
+  it("uses official Circle testnet USDC issuer by default", () => {
+    const config = loadConfig({ LUMEN_ENV: "testnet" });
+    const officialUsdcIssuer = "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5";
+    expect(config.networks["stellar:testnet"].assets[0].issuer).toBe(officialUsdcIssuer);
+  });
+
+  it("allows overriding testnet USDC issuer explicitly", () => {
+    const customIssuer = "GCYEX7MPJL64ZJ7ABZSPRC7YEBSI7OMC62FFEVFHCZFREBOYJPQDUCYJ";
+    const config = loadConfig({ STELLAR_TESTNET_USDC_ISSUER: customIssuer });
+    expect(config.networks["stellar:testnet"].assets[0]).toMatchObject({
+      code: "USDC",
+      issuer: customIssuer,
+      kind: "usdc"
+    });
+  });
+
+  it("loads custom LBT test-only asset when TESTNET_ASSET=lbt", () => {
+    const lbtIssuer = "GCYEX7MPJL64ZJ7ABZSPRC7YEBSI7OMC62FFEVFHCZFREBOYJPQDUCYJ";
+    const lbtContract = "CB256KDRXDO2FYJN3YBYZE5KCU46WIIE67DRP5T7HI45DRH2GM6YOJFS";
+    const config = loadConfig({
+      TESTNET_ASSET: "lbt",
+      TESTNET_LBT_ISSUER: lbtIssuer,
+      TESTNET_LBT_CONTRACT_ID: lbtContract
+    });
+
+    expect(config.networks["stellar:testnet"].assets[0]).toMatchObject({
+      code: "LBT",
+      issuer: lbtIssuer,
+      contractId: lbtContract,
+      kind: "lbt",
+      isTestOnly: true
+    });
+  });
+
+  it("flags LBT as test-only in metadata", () => {
+    const config = loadConfig({ TESTNET_ASSET: "lbt" });
+    const lbtAsset = config.networks["stellar:testnet"].assets[0];
+    expect(lbtAsset.kind).toBe("lbt");
+    expect(lbtAsset.isTestOnly).toBe(true);
+  });
+
+  it("rejects LBT on pubnet with a clear error", () => {
+    expect(() =>
+      loadConfig({
+        LUMEN_ENV: "mainnet",
+        NODE_ENV: "production",
+        API_PUBLIC_URL: "https://api.example.com",
+        MCP_PUBLIC_URL: "https://mcp.example.com/mcp",
+        DATABASE_URL: "postgresql://localhost:5432/lumenbazaar",
+        REDIS_URL: "redis://localhost:6379",
+        FACILITATOR_ACCOUNT: "GCYEX7MPJL64ZJ7ABZSPRC7YEBSI7OMC62FFEVFHCZFREBOYJPQDUCYJ",
+        STELLAR_TESTNET_USDC_ISSUER: "GCYEX7MPJL64ZJ7ABZSPRC7YEBSI7OMC62FFEVFHCZFREBOYJPQDUCYJ",
+        STELLAR_PUBNET_USDC_ISSUER: "GCYEX7MPJL64ZJ7ABZSPRC7YEBSI7OMC62FFEVFHCZFREBOYJPQDUCYJ",
+        TESTNET_ASSET: "lbt"
+      })
+    ).toThrow("cannot be used on pubnet");
+  });
+
+  it("rejects invalid TESTNET_ASSET values", () => {
+    expect(() => loadConfig({ TESTNET_ASSET: "invalid" })).toThrow(
+      'TESTNET_ASSET must be "usdc" or "lbt"'
+    );
+  });
+
+  it("ensures USDC and LBT never have mixed asset codes in output", () => {
+    const usdcConfig = loadConfig({ TESTNET_ASSET: "usdc" });
+    const lbtConfig = loadConfig({ TESTNET_ASSET: "lbt" });
+
+    expect(usdcConfig.networks["stellar:testnet"].assets[0].code).toBe("USDC");
+    expect(lbtConfig.networks["stellar:testnet"].assets[0].code).toBe("LBT");
+  });
+
+  it("marks USDC as not test-only", () => {
+    const config = loadConfig({ TESTNET_ASSET: "usdc" });
+    const usdcAsset = config.networks["stellar:testnet"].assets[0];
+    expect(usdcAsset.isTestOnly).toBe(false);
+    expect(usdcAsset.kind).toBe("usdc");
+  });
+
+  it("pubnet only supports USDC (never LBT)", () => {
+    const config = loadConfig({
+      LUMEN_ENV: "mainnet",
+      NODE_ENV: "test",
+      STELLAR_PUBNET_USDC_ISSUER: "GCYEX7MPJL64ZJ7ABZSPRC7YEBSI7OMC62FFEVFHCZFREBOYJPQDUCYJ"
+    });
+
+    const pubnetAsset = config.networks["stellar:pubnet"].assets[0];
+    expect(pubnetAsset.code).toBe("USDC");
+    expect(pubnetAsset.kind).toBe("usdc");
+    expect(pubnetAsset.isTestOnly).toBe(false);
+  });

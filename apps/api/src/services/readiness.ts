@@ -13,11 +13,32 @@ export type PaymentCapabilities = {
   upto: boolean;
 };
 
-export type ReadinessCheckStatus = "ready" | "unavailable" | "not_required";
+/**
+ * Status values for each dependency probe.
+ *
+ * - "ready"         — dependency responded successfully
+ * - "unavailable"   — dependency is reachable but unhealthy, or the probe threw
+ * - "timeout"       — probe did not complete within the configured deadline
+ * - "not_configured" — the dependency URL / credential is absent from config;
+ *                       the service will NOT serve this capability
+ * - "not_required"  — dependency is optional and not enabled for this deployment
+ */
+export type ReadinessCheckStatus =
+  | "ready"
+  | "unavailable"
+  | "timeout"
+  | "not_configured"
+  | "not_required";
 
 export type ReadinessCheck = {
   status: ReadinessCheckStatus;
-  detail?: string;
+  /** Elapsed probe time in milliseconds. Omitted when status is not_required or not_configured. */
+  latencyMs?: number;
+  /**
+   * Stable, generic reason code — never includes raw error messages, hostnames,
+   * credentials, URLs, or stack traces.
+   */
+  reason?: string;
 };
 
 export type ReadinessReport = {
@@ -49,7 +70,9 @@ export type ReadinessProbes = {
   assets: () => Promise<void>;
 };
 
-const probeTimeoutMs = 5_000;
+/** Default probe deadline. Override with READINESS_PROBE_TIMEOUT_MS env var or per-call. */
+const defaultProbeTimeoutMs = Number(process.env.READINESS_PROBE_TIMEOUT_MS ?? 2_000);
+
 const requiredMigrations = [
   "0001_core_catalog",
   "0002_payment_records",
@@ -63,23 +86,24 @@ const requiredMigrations = [
 export function createReadinessService(
   config: AppConfig,
   requestedCapabilities: PaymentCapabilities,
-  probes: ReadinessProbes = createRuntimeReadinessProbes(config)
+  probes: ReadinessProbes = createRuntimeReadinessProbes(config),
+  probeTimeoutMs: number = defaultProbeTimeoutMs
 ): ReadinessService {
   return {
     async evaluate() {
       const signerRequired = requestedCapabilities.exact || requestedCapabilities.upto;
       const [database, redis, stellarRpc, horizon, signer, migrations, assets] = await Promise.all([
-        runProbe(probes.database),
-        runProbe(probes.redis),
-        runProbe(probes.stellarRpc),
-        runProbe(probes.horizon),
+        runProbe(probes.database, probeTimeoutMs),
+        runProbe(probes.redis, probeTimeoutMs),
+        runProbe(probes.stellarRpc, probeTimeoutMs),
+        runProbe(probes.horizon, probeTimeoutMs),
         signerRequired
           ? probes.signer === undefined
-            ? Promise.resolve(unavailable("No signer readiness probe is registered."))
-            : runProbe(probes.signer)
+            ? Promise.resolve(notConfigured())
+            : runProbe(probes.signer, probeTimeoutMs)
           : Promise.resolve<ReadinessCheck>({ status: "not_required" }),
-        runProbe(probes.migrations),
-        runProbe(probes.assets)
+        runProbe(probes.migrations, probeTimeoutMs),
+        runProbe(probes.assets, probeTimeoutMs)
       ]);
       const requiredChecks = [database, redis, stellarRpc, horizon, migrations, assets];
       const sharedDependenciesReady = requiredChecks.every((check) => check.status === "ready");
@@ -133,7 +157,9 @@ export function createStaticReadinessService(
 
   return {
     async evaluate() {
-      const ok = Object.values(checks).every((check) => check.status !== "unavailable");
+      const ok = Object.values(checks).every(
+        (check) => check.status !== "unavailable" && check.status !== "timeout" && check.status !== "not_configured"
+      );
       return {
         ok,
         environment: config.lumenEnv,
@@ -146,7 +172,8 @@ export function createStaticReadinessService(
 
 export function createRuntimeReadinessProbes(
   config: AppConfig,
-  signerProvider?: FacilitatorSignerProvider
+  signerProvider?: FacilitatorSignerProvider,
+  probeTimeoutMs: number = defaultProbeTimeoutMs
 ): ReadinessProbes {
   const network = listConfiguredNetworks(config)[0];
 
@@ -203,7 +230,7 @@ export function createRuntimeReadinessProbes(
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getLatestLedger" })
-      });
+      }, probeTimeoutMs);
       if (!response.ok) {
         throw new Error(`Stellar RPC returned HTTP ${response.status}.`);
       }
@@ -213,7 +240,7 @@ export function createRuntimeReadinessProbes(
       }
     },
     async horizon() {
-      const response = await fetchWithTimeout(network.horizonUrl);
+      const response = await fetchWithTimeout(network.horizonUrl, undefined, probeTimeoutMs);
       if (!response.ok) {
         throw new Error(`Horizon returned HTTP ${response.status}.`);
       }
@@ -257,20 +284,57 @@ export function createRuntimeReadinessProbes(
   };
 }
 
-async function runProbe(probe: () => Promise<void>): Promise<ReadinessCheck> {
+/**
+ * Run a probe with a bounded timeout. Maps results to stable status codes:
+ * - success          → "ready"  with latencyMs
+ * - AbortError       → "timeout" with latencyMs
+ * - any other error  → "unavailable" with a generic reason (raw error is dropped)
+ */
+async function runProbe(probe: () => Promise<void>, timeoutMs: number): Promise<ReadinessCheck> {
+  const start = Date.now();
+
+  // Race the probe against a timeout promise so even probes that don't use
+  // AbortSignal internally are still bounded by the global deadline.
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    const id = setTimeout(() => {
+      reject(new ProbeTimeoutError());
+    }, timeoutMs);
+    // Allow the Node process to exit if only this timer remains.
+    if (typeof id === "object" && "unref" in id) (id as NodeJS.Timeout).unref();
+  });
+
   try {
-    await probe();
-    return { status: "ready" };
-  } catch {
-    return unavailable("Dependency check failed.");
+    await Promise.race([probe(), timeoutPromise]);
+    return { status: "ready", latencyMs: Date.now() - start };
+  } catch (err) {
+    const latencyMs = Date.now() - start;
+    if (err instanceof ProbeTimeoutError || isAbortError(err)) {
+      return { status: "timeout", latencyMs, reason: "probe_timeout" };
+    }
+    // Drop raw error messages — never surface hostnames, credentials, or stack traces.
+    return { status: "unavailable", latencyMs, reason: "dependency_check_failed" };
   }
 }
 
-function unavailable(detail: string): ReadinessCheck {
-  return { status: "unavailable", detail };
+class ProbeTimeoutError extends Error {
+  constructor() {
+    super("Probe timeout");
+    this.name = "ProbeTimeoutError";
+  }
 }
 
-async function fetchWithTimeout(url: string, init?: RequestInit) {
-  const signal = AbortSignal.timeout(probeTimeoutMs);
+function isAbortError(err: unknown): boolean {
+  return (
+    err instanceof Error &&
+    (err.name === "AbortError" || err.name === "TimeoutError" || err.message === "The operation was aborted.")
+  );
+}
+
+function notConfigured(): ReadinessCheck {
+  return { status: "not_configured", reason: "probe_not_registered" };
+}
+
+async function fetchWithTimeout(url: string, init?: RequestInit, timeoutMs: number = defaultProbeTimeoutMs) {
+  const signal = AbortSignal.timeout(timeoutMs);
   return fetch(url, { ...init, signal });
 }

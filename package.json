@@ -35,6 +35,7 @@
     "deploy:testnet:e2e:full": "tsx scripts/testnet-e2e-suite.ts --manifest docs/deployment/testnet-endpoints.json --output deployment-evidence/e2e-full.json",
     "deploy:testnet:e2e:validate": "tsx scripts/ci-security.ts validate-security",
     "catalog:testnet:seed": "tsx scripts/catalog-testnet-resources.ts",
+    "smoke:mcp": "tsx scripts/smoke-mcp.ts",
     "start": "tsx apps/api/src/main.ts",
     "start:api": "tsx apps/api/src/main.ts",
     "start:mcp": "tsx apps/mcp-server/src/main.ts",
