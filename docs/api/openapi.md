@@ -9,8 +9,8 @@ API version: 0.1.0
 
 | Method | Path                                      | Summary                                                                           |
 | ------ | ----------------------------------------- | --------------------------------------------------------------------------------- |
-| GET    | `/health`                                 | Return API process liveness.                                                      |
-| GET    | `/ready`                                  | Return dependency readiness and usable payment capabilities.                      |
+| GET    | `/health`                                 | Liveness probe — returns 200 while the process is running. Performs no I/O.                                       |
+| GET    | `/ready`                                  | Readiness probe — actively checks all dependencies and returns 503 if any required dependency is unavailable.     |
 | GET    | `/version`                                | Return backend version and environment.                                           |
 | GET    | `/v1/networks`                            | List configured Stellar networks and assets.                                      |
 | GET    | `/v1/supported`                           | List supported x402 payment schemes.                                              |

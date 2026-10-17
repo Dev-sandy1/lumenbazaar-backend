@@ -79,7 +79,7 @@ describe("API server base", () => {
     const readinessService = createStaticReadinessService(
       config,
       { exact: true, upto: false },
-      { database: { status: "unavailable", detail: "database unavailable" } }
+      { database: { status: "unavailable", reason: "dependency_check_failed" } }
     );
     const app = buildApiApp({ config, logger: false, readinessService });
 
@@ -96,6 +96,146 @@ describe("API server base", () => {
       capabilities: { exact: false, upto: false }
     });
     expect(supported.json().kinds).toEqual([]);
+    await app.close();
+  });
+
+  it("health stays 200 when redis is down", async () => {
+    const config = loadConfig({ LUMEN_ENV: "testnet" });
+    const readinessService = createStaticReadinessService(config, { exact: false, upto: false }, {
+      redis: { status: "unavailable", reason: "dependency_check_failed" }
+    });
+    const app = buildApiApp({ config, logger: false, readinessService });
+
+    const health = await app.inject({ method: "GET", url: "/health" });
+    const ready = await app.inject({ method: "GET", url: "/ready" });
+
+    expect(health.statusCode).toBe(200);
+    expect(ready.statusCode).toBe(503);
+    expect(ready.json().checks.redis.status).toBe("unavailable");
+    await app.close();
+  });
+
+  it("health stays 200 when horizon is timed out", async () => {
+    const config = loadConfig({ LUMEN_ENV: "testnet" });
+    const readinessService = createStaticReadinessService(config, { exact: false, upto: false }, {
+      horizon: { status: "timeout", latencyMs: 2001, reason: "probe_timeout" }
+    });
+    const app = buildApiApp({ config, logger: false, readinessService });
+
+    const health = await app.inject({ method: "GET", url: "/health" });
+    const ready = await app.inject({ method: "GET", url: "/ready" });
+
+    expect(health.statusCode).toBe(200);
+    expect(ready.statusCode).toBe(503);
+    expect(ready.json().checks.horizon.status).toBe("timeout");
+    await app.close();
+  });
+
+  it("health stays 200 when stellarRpc is timed out", async () => {
+    const config = loadConfig({ LUMEN_ENV: "testnet" });
+    const readinessService = createStaticReadinessService(config, { exact: false, upto: false }, {
+      stellarRpc: { status: "timeout", latencyMs: 2001, reason: "probe_timeout" }
+    });
+    const app = buildApiApp({ config, logger: false, readinessService });
+
+    const health = await app.inject({ method: "GET", url: "/health" });
+    const ready = await app.inject({ method: "GET", url: "/ready" });
+
+    expect(health.statusCode).toBe(200);
+    expect(ready.statusCode).toBe(503);
+    expect(ready.json().checks.stellarRpc.status).toBe("timeout");
+    await app.close();
+  });
+
+  it("health stays 200 when signer is not_configured (required but missing)", async () => {
+    const config = loadConfig({ LUMEN_ENV: "testnet" });
+    const readinessService = createStaticReadinessService(config, { exact: true, upto: false }, {
+      signer: { status: "not_configured" }
+    });
+    const app = buildApiApp({ config, logger: false, readinessService });
+
+    const health = await app.inject({ method: "GET", url: "/health" });
+    const ready = await app.inject({ method: "GET", url: "/ready" });
+
+    expect(health.statusCode).toBe(200);
+    expect(ready.statusCode).toBe(503);
+    expect(ready.json().checks.signer.status).toBe("not_configured");
+    await app.close();
+  });
+
+  it("health stays 200 when multiple dependencies are down simultaneously", async () => {
+    const config = loadConfig({ LUMEN_ENV: "testnet" });
+    const readinessService = createStaticReadinessService(config, { exact: false, upto: false }, {
+      database: { status: "unavailable", reason: "dependency_check_failed" },
+      redis: { status: "timeout", latencyMs: 2001, reason: "probe_timeout" },
+      horizon: { status: "unavailable", reason: "dependency_check_failed" }
+    });
+    const app = buildApiApp({ config, logger: false, readinessService });
+
+    const health = await app.inject({ method: "GET", url: "/health" });
+    const ready = await app.inject({ method: "GET", url: "/ready" });
+
+    expect(health.statusCode).toBe(200);
+    expect(ready.statusCode).toBe(503);
+    expect(ready.json().checks.database.status).toBe("unavailable");
+    expect(ready.json().checks.redis.status).toBe("timeout");
+    expect(ready.json().checks.horizon.status).toBe("unavailable");
+    await app.close();
+  });
+
+  it("health stays 200 when all dependencies are down", async () => {
+    const config = loadConfig({ LUMEN_ENV: "testnet" });
+    const readinessService = createStaticReadinessService(config, { exact: true, upto: false }, {
+      database: { status: "unavailable", reason: "dependency_check_failed" },
+      redis: { status: "unavailable", reason: "dependency_check_failed" },
+      stellarRpc: { status: "timeout", reason: "probe_timeout" },
+      horizon: { status: "timeout", reason: "probe_timeout" },
+      signer: { status: "not_configured" },
+      migrations: { status: "unavailable", reason: "dependency_check_failed" },
+      assets: { status: "unavailable", reason: "dependency_check_failed" }
+    });
+    const app = buildApiApp({ config, logger: false, readinessService });
+
+    const health = await app.inject({ method: "GET", url: "/health" });
+    const ready = await app.inject({ method: "GET", url: "/ready" });
+
+    expect(health.statusCode).toBe(200);
+    expect(health.json().ok).toBe(true);
+    expect(ready.statusCode).toBe(503);
+    expect(ready.json().ok).toBe(false);
+    await app.close();
+  });
+
+  it("readiness returns 200 when all dependencies are ready", async () => {
+    const config = loadConfig({ LUMEN_ENV: "testnet" });
+    const readinessService = createStaticReadinessService(config, { exact: false, upto: false });
+    const app = buildApiApp({ config, logger: false, readinessService });
+
+    const health = await app.inject({ method: "GET", url: "/health" });
+    const ready = await app.inject({ method: "GET", url: "/ready" });
+
+    expect(health.statusCode).toBe(200);
+    expect(ready.statusCode).toBe(200);
+    expect(ready.json().ok).toBe(true);
+    await app.close();
+  });
+
+  it("readiness response never contains raw error messages or credentials", async () => {
+    const config = loadConfig({ LUMEN_ENV: "testnet" });
+    const readinessService = createStaticReadinessService(config, { exact: false, upto: false }, {
+      database: { status: "unavailable", reason: "dependency_check_failed" }
+    });
+    const app = buildApiApp({ config, logger: false, readinessService });
+
+    const ready = await app.inject({ method: "GET", url: "/ready" });
+    const body = ready.body;
+
+    // Must never contain anything that could leak sensitive data
+    expect(body).not.toMatch(/postgresql:\/\//);
+    expect(body).not.toMatch(/redis:\/\//);
+    expect(body).not.toMatch(/password/i);
+    expect(body).not.toMatch(/secret/i);
+    expect(body).not.toMatch(/ECONNREFUSED/);
     await app.close();
   });
 
