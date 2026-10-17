@@ -70,6 +70,16 @@ export type ConformanceRunStore = {
 export type ConformanceRunServiceOptions = {
   exactEnabled?: boolean;
   uptoEnabled?: boolean;
+  /**
+   * When provided, capabilities are read from the registry at run time rather
+   * than from the static `exactEnabled` / `uptoEnabled` flags.  The registry
+   * takes precedence: if it reports a scheme as unsupported, the corresponding
+   * conformance cases are reserved regardless of the static flags.
+   *
+   * `exactEnabled` / `uptoEnabled` may still be used to further restrict
+   * (never to expand) what the registry reports.
+   */
+  capabilityRegistry?: () => import("./capabilityRegistry.js").CapabilityRegistry;
 };
 
 export const runConformanceSchema = z.object({
@@ -123,11 +133,29 @@ export class ConformanceRunService {
   async run(input: unknown) {
     const request = runConformanceSchema.parse(input ?? {});
     const startedAt = new Date().toISOString();
+
+    // Determine enabled flags: prefer registry over static options when both
+    // are available. The registry can only restrict, never expand, what the
+    // static options say.
+    let exactEnabled = this.options.exactEnabled !== false;
+    let uptoEnabled = this.options.uptoEnabled === true;
+
+    if (this.options.capabilityRegistry !== undefined) {
+      const registry = this.options.capabilityRegistry();
+      const registryExact = registry.isSupported("exact", request.network);
+      const registryUpto = registry.isSupported("upto", request.network);
+      // Registry takes precedence: if it says unavailable, override static.
+      exactEnabled = exactEnabled && registryExact;
+      uptoEnabled = uptoEnabled || registryUpto;
+      // But registry can never *add* exact if static opts explicitly disable it.
+      if (this.options.exactEnabled === false) exactEnabled = false;
+    }
+
     const definitions = conformanceDefinitions(
       request.network,
       request.includeReserved,
-      this.options.uptoEnabled === true,
-      this.options.exactEnabled !== false
+      uptoEnabled,
+      exactEnabled
     );
     const results: ConformanceCaseResult[] = [];
 
@@ -169,11 +197,23 @@ export class ConformanceRunService {
   }
 
   getDefinitions(network: NetworkId = "stellar:testnet") {
+    let exactEnabled = this.options.exactEnabled !== false;
+    let uptoEnabled = this.options.uptoEnabled === true;
+
+    if (this.options.capabilityRegistry !== undefined) {
+      const registry = this.options.capabilityRegistry();
+      const registryExact = registry.isSupported("exact", network);
+      const registryUpto = registry.isSupported("upto", network);
+      exactEnabled = exactEnabled && registryExact;
+      uptoEnabled = uptoEnabled || registryUpto;
+      if (this.options.exactEnabled === false) exactEnabled = false;
+    }
+
     return conformanceDefinitions(
       network,
       true,
-      this.options.uptoEnabled === true,
-      this.options.exactEnabled !== false
+      uptoEnabled,
+      exactEnabled
     );
   }
 

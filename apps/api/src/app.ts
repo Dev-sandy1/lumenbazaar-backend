@@ -52,6 +52,11 @@ import {
   type PaymentCapabilities,
   type ReadinessService
 } from "./services/readiness.js";
+import {
+  buildCapabilityRegistry,
+  createStaticCapabilityRegistry,
+  type CapabilityRegistry
+} from "./services/capabilityRegistry.js";
 import { ResourceService } from "./services/resources.js";
 import { SearchService } from "./services/search.js";
 import { SellerService } from "./services/sellers.js";
@@ -77,9 +82,27 @@ export type BuildApiAppOptions = {
   auditLogService?: AuditLogService;
   rateLimitService?: RateLimitService;
   metricsService?: MetricsService;
+  /**
+   * Static capability overrides injected in tests.
+   *
+   * May only RESTRICT capabilities (set `exact: false` or `upto: false`),
+   * never ADD them.  A scheme set to `false` here will not be registered even
+   * if its adapter startup check passes.  This behaviour is tested in
+   * `capabilityRegistry.test.ts`.
+   *
+   * @deprecated as the primary source of truth — use `capabilityRegistry`
+   *   or `signerProvider` for live deployments.  This option is retained
+   *   solely for test isolation.
+   */
   paymentCapabilities?: PaymentCapabilities;
   readinessService?: ReadinessService;
   signerProvider?: FacilitatorSignerProvider;
+  /**
+   * Pre-built capability registry.  Injected by tests that need fine-grained
+   * control over which schemes are reported as supported without running real
+   * adapter startup checks.
+   */
+  capabilityRegistry?: CapabilityRegistry;
   streamAccessService?: StreamAccessService;
   receiptStatusStreamService?: ReceiptStatusStreamService;
   eventStreamTuning?: EventStreamTuning;
@@ -207,6 +230,38 @@ export function buildApiApp(options: BuildApiAppOptions = {}) {
   const searchService =
     options.searchService ??
     new SearchService(resourceService, metricsService, catalogPersistence.searchDocumentStore);
+  // ── Capability registry ──────────────────────────────────────────────────────
+  // Built asynchronously in onReady so adapter startup checks complete before
+  // traffic is accepted. Tests may inject a pre-built registry via options.
+  let capRegistry: CapabilityRegistry | undefined = options.capabilityRegistry;
+
+  // When no pre-built registry is provided, construct one in onReady.
+  if (capRegistry === undefined) {
+    app.addHook("onReady", async () => {
+      capRegistry = await buildCapabilityRegistry({
+        exactAdapter: runtimeAdapter,
+        uptoService: options.paymentSessionService === undefined ? paymentSessionService : undefined,
+        networks: listConfiguredNetworks(config).map((n) => n.id),
+        allowedCapabilities: options.paymentCapabilities,
+        checkOptions: { timeoutMs: 5_000 },
+        logger: {
+          info: (msg, data) => app.log.info({ ...data, event: msg }),
+          warn: (msg, data) => app.log.warn({ ...data, event: msg })
+        }
+      });
+    });
+  }
+
+  // Accessor used by routes: always resolves after onReady has run.
+  function getCapabilityRegistry(): CapabilityRegistry {
+    if (capRegistry === undefined) {
+      // This can only happen if a route fires before onReady, which Fastify
+      // prevents. Return an empty registry as a safe fallback.
+      return createStaticCapabilityRegistry({});
+    }
+    return capRegistry;
+  }
+
   const conformanceService =
     options.conformanceService ??
     new ConformanceRunService(
@@ -218,8 +273,15 @@ export function buildApiApp(options: BuildApiAppOptions = {}) {
       ),
       undefined,
       {
-        exactEnabled: paymentCapabilities.exact,
-        uptoEnabled: config.features.uptoScheme && paymentCapabilities.upto
+        // Capability options are forwarded from the registry once initialized.
+        // These are overridden at runtime via getCapabilityRegistry() in the
+        // conformance service when a registry is wired in.
+        exactEnabled: options.paymentCapabilities?.exact,
+        uptoEnabled:
+          options.paymentCapabilities?.upto !== undefined
+            ? config.features.uptoScheme && options.paymentCapabilities.upto
+            : undefined,
+        capabilityRegistry: () => getCapabilityRegistry()
       }
     );
 
@@ -251,7 +313,8 @@ export function buildApiApp(options: BuildApiAppOptions = {}) {
     receiptService: routeReceiptService,
     metrics: metricsService,
     readiness: readinessService,
-    receiptStreams: receiptStatusStreams
+    receiptStreams: receiptStatusStreams,
+    capabilityRegistry: () => getCapabilityRegistry()
   });
   registerPaymentSessionRoutes(app, { paymentSessionService });
   registerSellerRoutes(app, { sellerService });

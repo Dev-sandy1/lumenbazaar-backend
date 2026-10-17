@@ -13,11 +13,19 @@ import {
 import { parseParams } from "../http/validation.js";
 import { type MetricsService } from "../services/metrics.js";
 import { type ReadinessService } from "../services/readiness.js";
+import { type CapabilityRegistry } from "../services/capabilityRegistry.js";
 import { type ReceiptStatusStreamService } from "../services/receiptStatusStreams.js";
 
 export type FacilitatorRouteOptions = {
   config: AppConfig;
   readiness: ReadinessService;
+  /**
+   * When provided, `GET /v1/supported` reads which schemes are available from
+   * the capability registry instead of (or in addition to) the readiness report.
+   * The registry is the authoritative source; readiness gates further on live
+   * dependency health per request.
+   */
+  capabilityRegistry?: () => CapabilityRegistry;
   verificationService?: PaymentVerificationService;
   settlementService?: SettlementService;
   receiptService?: ReceiptService;
@@ -36,9 +44,25 @@ export function registerFacilitatorRoutes(app: FastifyInstance, options: Facilit
   const receiptService = options.receiptService ?? settlementService.getReceiptService();
 
   app.get("/v1/supported", async () => {
-    const capabilities = (await options.readiness.evaluate()).capabilities;
     const networks = listConfiguredNetworks(options.config);
-    const exactKinds = capabilities.exact
+
+    // Determine which schemes are supported.
+    // When a capability registry is wired in, it is the authoritative source:
+    // its decision is derived from adapter startup checks.  The readiness report
+    // is evaluated in parallel and acts as a live-dependency gate — a scheme that
+    // passes its startup check can still be suppressed if a dependency is down.
+    const readinessReport = await options.readiness.evaluate();
+    const readinessCapabilities = readinessReport.capabilities;
+
+    const registry = options.capabilityRegistry?.();
+    const exactEnabled = registry !== undefined
+      ? registry.isSupported("exact", networks[0]?.id ?? "stellar:testnet") && readinessCapabilities.exact
+      : readinessCapabilities.exact;
+    const uptoEnabled = registry !== undefined
+      ? registry.isSupported("upto", networks[0]?.id ?? "stellar:testnet") && readinessCapabilities.upto
+      : readinessCapabilities.upto;
+
+    const exactKinds = exactEnabled
       ? networks.map((network) => ({
           x402Version: 2,
           scheme: "exact",
@@ -55,7 +79,7 @@ export function registerFacilitatorRoutes(app: FastifyInstance, options: Facilit
         }))
       : [];
     const uptoKinds = networks.flatMap((network) =>
-      capabilities.upto &&
+      uptoEnabled &&
       options.config.features.uptoScheme &&
       network.uptoSessionContractId !== undefined
         ? [
