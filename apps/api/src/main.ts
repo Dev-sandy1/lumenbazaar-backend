@@ -5,12 +5,16 @@ import {
   createRuntimeFacilitatorSignerProvider
 } from "@lumenbazaar/stellar-payments";
 
+
 const config = loadConfig();
 const signerProvider = createRuntimeFacilitatorSignerProvider(config);
 await assertRuntimeSignerReady(signerProvider);
 
 const app = buildApiApp({
   config,
+  // Only forward the signer provider when one was actually configured;
+  // otherwise leave the option absent so downstream code can detect the
+  // "no signer" case explicitly.
   ...(signerProvider === undefined ? {} : { signerProvider })
 });
 

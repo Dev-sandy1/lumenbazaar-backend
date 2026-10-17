@@ -158,7 +158,23 @@ export function createRuntimeReadinessProbes(
     ...(signerProvider === undefined
       ? {}
       : {
-          signer: async () => signerProvider.assertReady()
+          signer: async () => {
+            await signerProvider.assertReady();
+            const status = await signerProvider.getStatus();
+            if (status.state !== "active") {
+              throw new Error("Facilitator signer is not in the active state.");
+            }
+            if (status.retiring !== undefined && status.retiring.length > 0) {
+              const now = Date.now();
+              for (const retiring of status.retiring) {
+                if (retiring.retireAt <= now) {
+                  throw new Error(
+                    `Facilitator signer ${retiring.keyId} is past its retirement window.`
+                  );
+                }
+              }
+            }
+          }
         }),
     async database() {
       const client = createPrismaClient(config.databaseUrl);
