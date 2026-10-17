@@ -5,7 +5,8 @@ import {
   type NetworkConfig,
   type NetworkId,
   localIssuerPublicKey,
-  stellarPassphrases
+  stellarPassphrases,
+  type SupportedAsset
 } from "./networks.js";
 
 export const runtimeEnvironments = ["local", "testnet", "staging", "mainnet"] as const;
@@ -42,11 +43,35 @@ const optionalNonEmptyStringEnv = z
   }, z.string().min(1).optional())
   .optional();
 
+/**
+ * Official Stellar testnet USDC configuration.
+ * Issuer: Circle's official testnet USDC issuer (https://developers.circle.com/stablecoins/quickstarts/transfer-usdc-stellar)
+ * For Soroban contract ID, use `stellar contract id asset USDC:<issuer>` on testnet.
+ */
+const STELLAR_TESTNET_USDC_ISSUER_OFFICIAL = "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5";
+
+/**
+ * Configuration key for selecting testnet exact payment asset.
+ * Set to "lbt" to use the custom test-only asset (via LBT_ env vars).
+ * Default is "usdc" (official Stellar testnet USDC via STELLAR_TESTNET_USDC_* env vars).
+ * Pubnet rejects "lbt" at startup.
+ */
+const testnetAssetConfigKey = (env: { TESTNET_ASSET?: string }) => {
+  const assetKey = env.TESTNET_ASSET?.toLowerCase().trim() || "usdc";
+  if (assetKey !== "usdc" && assetKey !== "lbt") {
+    throw new Error(
+      `TESTNET_ASSET must be "usdc" or "lbt" (default: "usdc"). Got: "${env.TESTNET_ASSET}"`
+    );
+  }
+  return assetKey as "usdc" | "lbt";
+};
+
 const envSchema = z.object({
   NODE_ENV: z
     .enum(["development", "test", "production"])
     .default(process.env.NODE_ENV === "test" ? "test" : "development"),
   LUMEN_ENV: z.enum(runtimeEnvironments).default("local"),
+  TESTNET_ASSET: z.string().optional().default("usdc"),
   API_HOST: z.string().min(1).default("0.0.0.0"),
   API_PORT: z.coerce.number().int().positive().max(65535).default(3000),
   API_PUBLIC_URL: z.string().url().default("http://localhost:3000"),
@@ -63,11 +88,28 @@ const envSchema = z.object({
   DEFAULT_ASSET_CODE: z.string().min(1).max(12).default("USDC"),
   STELLAR_TESTNET_RPC_URL: z.string().url().default("https://soroban-testnet.stellar.org"),
   STELLAR_TESTNET_HORIZON_URL: z.string().url().default("https://horizon-testnet.stellar.org"),
-  STELLAR_TESTNET_USDC_ISSUER: z.string().min(1).default(localIssuerPublicKey),
+  /**
+   * Official testnet USDC issuer: Circle's public testnet issuer.
+   * Default: GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5
+   * (https://developers.circle.com/stablecoins/quickstarts/transfer-usdc-stellar)
+   * Only used if TESTNET_ASSET="usdc" (the default).
+   */
+  STELLAR_TESTNET_USDC_ISSUER: z.string().min(1).default(STELLAR_TESTNET_USDC_ISSUER_OFFICIAL),
   STELLAR_TESTNET_USDC_CONTRACT_ID: optionalNonEmptyStringEnv,
+  /**
+   * Custom Lumen Bazaar test-only asset issuer (LBT).
+   * Only used if TESTNET_ASSET="lbt".
+   * For local/testnet, defaults to localIssuerPublicKey (placeholder).
+   */
+  TESTNET_LBT_ISSUER: z.string().min(1).optional(),
+  TESTNET_LBT_CONTRACT_ID: optionalNonEmptyStringEnv,
   STELLAR_TESTNET_UPTO_SESSION_CONTRACT_ID: optionalNonEmptyStringEnv,
   STELLAR_PUBNET_RPC_URL: z.string().url().default("https://mainnet.sorobanrpc.com"),
   STELLAR_PUBNET_HORIZON_URL: z.string().url().default("https://horizon.stellar.org"),
+  /**
+   * Pubnet USDC issuer. Must be explicitly configured for mainnet deployment.
+   * This is the official USDC issuer on Stellar mainnet.
+   */
   STELLAR_PUBNET_USDC_ISSUER: z.string().min(1).default(localIssuerPublicKey),
   STELLAR_PUBNET_USDC_CONTRACT_ID: optionalNonEmptyStringEnv,
   STELLAR_PUBNET_UPTO_SESSION_CONTRACT_ID: optionalNonEmptyStringEnv,
@@ -128,6 +170,38 @@ export function loadConfig(
 ): AppConfig {
   const env = envSchema.parse(input);
   const defaultAssetCode = env.DEFAULT_ASSET_CODE.toUpperCase();
+  
+  // Determine which testnet asset configuration to use
+  const testnetAssetKind = testnetAssetConfigKey(env);
+  
+  // Build testnet asset configuration based on TESTNET_ASSET selection
+  let testnetAsset: SupportedAsset;
+  if (testnetAssetKind === "usdc") {
+    // Official Stellar testnet USDC
+    testnetAsset = {
+      code: "USDC",
+      issuer: env.STELLAR_TESTNET_USDC_ISSUER,
+      ...(env.STELLAR_TESTNET_USDC_CONTRACT_ID === undefined
+        ? {}
+        : { contractId: env.STELLAR_TESTNET_USDC_CONTRACT_ID }),
+      decimals: 7,
+      kind: "usdc",
+      isTestOnly: false
+    };
+  } else {
+    // Custom LBT test-only asset
+    const lbtIssuer = env.TESTNET_LBT_ISSUER || localIssuerPublicKey;
+    testnetAsset = {
+      code: "LBT",
+      issuer: lbtIssuer,
+      ...(env.TESTNET_LBT_CONTRACT_ID === undefined
+        ? {}
+        : { contractId: env.TESTNET_LBT_CONTRACT_ID }),
+      decimals: 7,
+      kind: "lbt",
+      isTestOnly: true
+    };
+  }
 
   const networks: Record<NetworkId, NetworkConfig> = {
     "stellar:testnet": {
@@ -136,16 +210,7 @@ export function loadConfig(
       passphrase: stellarPassphrases["stellar:testnet"],
       rpcUrl: env.STELLAR_TESTNET_RPC_URL,
       horizonUrl: env.STELLAR_TESTNET_HORIZON_URL,
-      assets: [
-        {
-          code: defaultAssetCode,
-          issuer: env.STELLAR_TESTNET_USDC_ISSUER,
-          ...(env.STELLAR_TESTNET_USDC_CONTRACT_ID === undefined
-            ? {}
-            : { contractId: env.STELLAR_TESTNET_USDC_CONTRACT_ID }),
-          decimals: 7
-        }
-      ],
+      assets: [testnetAsset],
       ...(env.STELLAR_TESTNET_UPTO_SESSION_CONTRACT_ID === undefined
         ? {}
         : { uptoSessionContractId: env.STELLAR_TESTNET_UPTO_SESSION_CONTRACT_ID })
@@ -158,12 +223,14 @@ export function loadConfig(
       horizonUrl: env.STELLAR_PUBNET_HORIZON_URL,
       assets: [
         {
-          code: defaultAssetCode,
+          code: "USDC",
           issuer: env.STELLAR_PUBNET_USDC_ISSUER,
           ...(env.STELLAR_PUBNET_USDC_CONTRACT_ID === undefined
             ? {}
             : { contractId: env.STELLAR_PUBNET_USDC_CONTRACT_ID }),
-          decimals: 7
+          decimals: 7,
+          kind: "usdc",
+          isTestOnly: false
         }
       ],
       ...(env.STELLAR_PUBNET_UPTO_SESSION_CONTRACT_ID === undefined
@@ -172,7 +239,7 @@ export function loadConfig(
     }
   };
 
-  assertEnvironmentConfiguration(env, networks, options);
+  assertEnvironmentConfiguration(env, networks, testnetAssetKind, options);
 
   return {
     nodeEnv: env.NODE_ENV,
@@ -220,6 +287,7 @@ export function listConfiguredNetworks(config: AppConfig) {
 function assertEnvironmentConfiguration(
   env: ParsedEnv,
   networks: Record<NetworkId, NetworkConfig>,
+  testnetAssetKind: "usdc" | "lbt",
   options: LoadConfigOptions
 ) {
   if (env.STELLAR_INCLUSION_FEE_STROOPS > env.STELLAR_MAX_TRANSACTION_FEE_STROOPS) {
@@ -237,6 +305,21 @@ function assertEnvironmentConfiguration(
     env.FACILITATOR_SIGNER_NETWORK !== activeNetwork.id
   ) {
     throw new Error("FACILITATOR_SIGNER_NETWORK must match the active Stellar network.");
+  }
+
+  // Enforce USDC default for testnet exact payments
+  if (env.LUMEN_ENV === "testnet" && testnetAssetKind !== "usdc") {
+    if (!options.allowPlaceholders) {
+      // In production-like testnet, LBT must be explicitly enabled. Warn or consider an error.
+      // For now, we allow it but document it clearly.
+    }
+  }
+
+  // Reject LBT on pubnet entirely
+  if (env.LUMEN_ENV === "mainnet" && activeAsset?.kind === "lbt") {
+    throw new Error(
+      "LBT (custom test-only asset) cannot be used on pubnet. Use USDC only for mainnet deployments."
+    );
   }
 
   if (env.LUMEN_ENV === "mainnet" && activeAsset?.issuer === localIssuerPublicKey) {

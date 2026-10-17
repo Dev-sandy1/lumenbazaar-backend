@@ -3,6 +3,51 @@
 This runbook deploys the backend API, worker, and MCP server against Stellar testnet. The
 deployment owns Postgres, Redis, and the discovery search index used by the API.
 
+## Asset Configuration
+
+Exact payment requirements on testnet use **official Stellar testnet USDC** by default. This ensures
+all payments are documented and conform to Circle's public testnet USDC configuration.
+
+### Official Testnet USDC
+
+- **Issuer**: `GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5`
+- **Source**: [Circle Developer Docs](https://developers.circle.com/stablecoins/quickstarts/transfer-usdc-stellar)
+- **Configuration**: Set `TESTNET_ASSET=usdc` (the default).
+- **Soroban Contract**: To deploy the asset contract for this issuer, run:
+  ```bash
+  stellar contract id asset USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5 --network testnet
+  ```
+
+### Custom LBT Test-Only Asset
+
+The custom **Lumen Bazaar Test (LBT)** asset is available for contract experiments and testing only.
+It is explicitly marked as a test-only asset in all output and must never be reported as USDC.
+
+- **Purpose**: Custom test-only asset for smart contract experimentation.
+- **Configuration**: Set `TESTNET_ASSET=lbt` and provide `TESTNET_LBT_ISSUER` and `TESTNET_LBT_CONTRACT_ID`.
+- **Restrictions**: LBT is rejected on mainnet; only USDC is supported for production.
+- **Clear Labeling**: Supported capabilities and payment requirements always report the asset as "LBT"
+  with `isTestOnly: true`, never as USDC.
+
+### Migration from LBT to USDC
+
+If you have an existing deployment using LBT, migrate to official USDC as follows:
+
+1. **Update config**: Change `TESTNET_ASSET=lbt` to `TESTNET_ASSET=usdc` (or omit to use the default).
+2. **Update USDC values**: Ensure the issuer and contract ID match the official values:
+   ```env
+   STELLAR_TESTNET_USDC_ISSUER=GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5
+   STELLAR_TESTNET_USDC_CONTRACT_ID=<your-deployed-contract-id>
+   ```
+3. **Restart services**: Redeploy the API, worker, and MCP server. Existing deployments using LBT
+   will continue to work until restarted, but new exact payment requirements will advertise USDC.
+4. **Catalog Migration**: Sellers must re-catalog resources with `assetCode: "USDC"` if they were
+   previously using LBT. See `POST /v1/sellers/<id>/resources` for details.
+
+**Backward Compatibility**: The system supports both assets simultaneously in code. If `TESTNET_ASSET=lbt`,
+deployments continue to use LBT for exact payments. To lock USDC as the only supported asset, set
+`TESTNET_ASSET=usdc` and do not configure `TESTNET_LBT_*` variables.
+
 ## Services
 
 - API: `pnpm start:api`
@@ -80,8 +125,11 @@ contains the full monorepo, so only one image build is needed.
 | Both           | `REDIS_URL`                   | Redis connection string                                |
 | api            | `API_PUBLIC_URL`              | e.g. `https://lumenbazaar-backend.onrender.com`        |
 | api            | `CORS_ALLOWED_ORIGINS`        | Frontend origins                                       |
-| api            | `STELLAR_TESTNET_USDC_ISSUER` |                                                        |
-| api            | `STELLAR_TESTNET_USDC_CONTRACT_ID` |                                                   |
+| api            | `TESTNET_ASSET`               | `usdc` (default) or `lbt` (custom test-only)           |
+| api            | `STELLAR_TESTNET_USDC_ISSUER` | Official Stellar testnet USDC issuer (with TESTNET_ASSET=usdc) |
+| api            | `STELLAR_TESTNET_USDC_CONTRACT_ID` | Official Stellar testnet USDC contract (with TESTNET_ASSET=usdc) |
+| api            | `TESTNET_LBT_ISSUER`          | LBT custom asset issuer (only with TESTNET_ASSET=lbt)  |
+| api            | `TESTNET_LBT_CONTRACT_ID`     | LBT custom asset contract (only with TESTNET_ASSET=lbt)|
 | api            | `FACILITATOR_ACCOUNT`         |                                                        |
 | api            | `FACILITATOR_SIGNING_KEY`     | Secret; never in repo                                  |
 | api            | `FACILITATOR_SIGNING_KEY_VERSION` |                                                    |
@@ -103,6 +151,7 @@ Required settings:
 
 - `NODE_ENV=production`
 - `LUMEN_ENV=testnet`
+- `TESTNET_ASSET=usdc` (default; or `lbt` for custom test-only asset)
 - `API_PUBLIC_URL`
 - `MCP_PUBLIC_URL`
 - `MCP_TRUST_PROXY` (`true` only behind an ingress that replaces client forwarding headers)
@@ -111,8 +160,10 @@ Required settings:
 - `REDIS_URL`
 - `STELLAR_TESTNET_RPC_URL`
 - `STELLAR_TESTNET_HORIZON_URL`
-- `STELLAR_TESTNET_USDC_ISSUER`
-- `STELLAR_TESTNET_USDC_CONTRACT_ID`
+- `STELLAR_TESTNET_USDC_ISSUER` (if using USDC; defaults to official Circle testnet issuer)
+- `STELLAR_TESTNET_USDC_CONTRACT_ID` (if using USDC)
+- `TESTNET_LBT_ISSUER` (if using LBT; optional, defaults to local placeholder)
+- `TESTNET_LBT_CONTRACT_ID` (if using LBT; optional)
 - `FACILITATOR_ACCOUNT`
 - `FACILITATOR_SIGNER_PROVIDER=environment`
 - `FACILITATOR_SIGNER_NETWORK=stellar:testnet`
