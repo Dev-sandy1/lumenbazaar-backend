@@ -1,5 +1,11 @@
 export { BackendClient, createBackendClient } from "./client.js";
-export { handleMcpHttpRequest, startMcpHttpServer } from "./http.js";
+export {
+  applyCorsHeaders,
+  handleMcpHttpRequest,
+  parseCorsAllowedOrigins,
+  resolveCorsOrigin,
+  startMcpHttpServer
+} from "./http.js";
 export type { McpHttpServerHandle, McpHttpServerOptions } from "./http.js";
 export {
   McpError,

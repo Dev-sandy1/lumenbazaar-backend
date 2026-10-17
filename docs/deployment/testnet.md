@@ -10,6 +10,89 @@ deployment owns Postgres, Redis, and the discovery search index used by the API.
 - MCP stdio: `pnpm start:mcp`
 - MCP Streamable HTTP: `pnpm start:mcp:http`
 
+## MCP Endpoint
+
+The MCP server exposes a single Streamable HTTP transport endpoint:
+
+```
+POST  https://lumenbazaar-mcp.onrender.com/mcp    MCP requests (initialize, tools/list, tools/call)
+GET   https://lumenbazaar-mcp.onrender.com/mcp    SSE event stream (session resumption)
+```
+
+All other HTTP methods on `/mcp` return `405 Method Not Allowed`.
+
+Supporting utility routes (all `GET` only):
+
+| Path       | Description                                         |
+|------------|-----------------------------------------------------|
+| `/health`  | Process liveness — always 200 while the process is up |
+| `/ready`   | Backend readiness — 200 when API is up; 503 otherwise |
+| `/version` | Service version, git commit, and environment        |
+| `/schema`  | JSON schema document of all available MCP tools     |
+| `/metrics` | Prometheus text metrics                             |
+
+## Transport and CORS Settings
+
+The MCP HTTP server uses `StreamableHTTPServerTransport` from the official
+`@modelcontextprotocol/sdk`. Session identity is carried in the `Mcp-Session-Id` header
+which is generated server-side and exposed via `Access-Control-Expose-Headers`.
+
+**CORS policy — no wildcard with credentials:**
+Browser-based and hosted MCP clients send custom headers (`Mcp-Session-Id`,
+`Mcp-Protocol-Version`) that require CORS. Because `Mcp-Session-Id` acts as a bearer
+credential, the server does **not** use `Access-Control-Allow-Origin: *` by default
+— browsers refuse to attach credentials to wildcard responses. Instead:
+
+- Set `MCP_ALLOWED_ORIGINS` to a comma-separated list of trusted frontend origins.
+  The server reflects only the exact origin back, and includes
+  `Access-Control-Allow-Credentials: true`.
+- `MCP_ALLOWED_ORIGINS=*` is supported for fully public, credential-free deployments
+  (no `Allow-Credentials` header is emitted in this mode).
+- Unrecognised origins receive **no** CORS header — the browser blocks the request.
+  This is the secure default.
+
+Required headers always allowed: `Content-Type`, `Accept`, `Mcp-Session-Id`,
+`Mcp-Protocol-Version`, `Authorization`.
+
+`OPTIONS` preflight requests are handled before rate-limiting, so they are always
+answered quickly and do not consume the caller's rate-limit quota.
+
+## Render Deployment
+
+The repo ships a `render.yaml` at the root that defines two Render web services
+(`lumenbazaar-backend` and `lumenbazaar-mcp`) built from the shared `Dockerfile`.
+The only difference between the two services is the `dockerCommand` override:
+
+| Service                | `dockerCommand`        |
+|------------------------|------------------------|
+| `lumenbazaar-backend`  | `pnpm start:api`       |
+| `lumenbazaar-mcp`      | `pnpm start:mcp:http`  |
+
+Render reads `render.yaml` on first import or after you click **Sync** in the
+dashboard. Both services use the same Docker image (built from the repo root) which
+contains the full monorepo, so only one image build is needed.
+
+**Required secret/non-default env vars to set in the Render dashboard** (not in render.yaml):
+
+| Service        | Variable                      | Notes                                                  |
+|----------------|-------------------------------|--------------------------------------------------------|
+| Both           | `DATABASE_URL`                | Postgres connection string                             |
+| Both           | `REDIS_URL`                   | Redis connection string                                |
+| api            | `API_PUBLIC_URL`              | e.g. `https://lumenbazaar-backend.onrender.com`        |
+| api            | `CORS_ALLOWED_ORIGINS`        | Frontend origins                                       |
+| api            | `STELLAR_TESTNET_USDC_ISSUER` |                                                        |
+| api            | `STELLAR_TESTNET_USDC_CONTRACT_ID` |                                                   |
+| api            | `FACILITATOR_ACCOUNT`         |                                                        |
+| api            | `FACILITATOR_SIGNING_KEY`     | Secret; never in repo                                  |
+| api            | `FACILITATOR_SIGNING_KEY_VERSION` |                                                    |
+| api            | `EVENT_STREAM_SIGNING_SECRET` |                                                        |
+| mcp            | `MCP_PUBLIC_URL`              | e.g. `https://lumenbazaar-mcp.onrender.com/mcp`        |
+| mcp            | `MCP_ALLOWED_ORIGINS`         | Comma-separated trusted origins; omit for no CORS      |
+| mcp            | `API_BASE_URL`                | e.g. `https://lumenbazaar-backend.onrender.com`        |
+
+`MCP_TRUST_PROXY=true` is already set in `render.yaml` for the mcp service
+because Render injects `X-Forwarded-For`.
+
 ## Environment
 
 `config/testnet.release.env` records the non-secret public release profile and Phase 10 testnet
@@ -23,6 +106,7 @@ Required settings:
 - `API_PUBLIC_URL`
 - `MCP_PUBLIC_URL`
 - `MCP_TRUST_PROXY` (`true` only behind an ingress that replaces client forwarding headers)
+- `MCP_ALLOWED_ORIGINS` (comma-separated list of allowed CORS origins, or `*` for public deployments)
 - `DATABASE_URL`
 - `REDIS_URL`
 - `STELLAR_TESTNET_RPC_URL`
@@ -98,6 +182,93 @@ advertises payment preparation and paid-call tools only while the backend report
 exact capability. Its HTTP boundary rate-limits callers, caps declared request bodies, does not
 publish OAuth metadata, never forwards caller credentials, and pins paid calls to the resource URL
 stored in the catalog.
+
+## Smoke Test
+
+The smoke script validates the full MCP protocol handshake against any live or local endpoint.
+It is the fastest way to confirm that a deployment is serving correct MCP responses.
+
+```bash
+# Against the deployed testnet MCP endpoint
+MCP_SMOKE_URL=https://lumenbazaar-mcp.onrender.com/mcp pnpm smoke:mcp
+
+# Against a specific URL passed as an argument
+pnpm smoke:mcp https://lumenbazaar-mcp.onrender.com/mcp
+
+# Against a locally running server
+MCP_SMOKE_URL=http://localhost:3001/mcp pnpm smoke:mcp
+```
+
+The script performs four steps in order:
+1. **initialize** — MCP `initialize` + `notifications/initialized`
+2. **tools/list** — lists available tools and validates their schemas
+3. **tools/call inspect_budget** — calls the always-available read-only local tool
+
+`inspect_budget` was chosen as the smoke call because its capability is `"local"` — it
+requires no backend connection and always succeeds as long as the MCP server process is
+healthy. It carries no payment risk.
+
+### Expected output (pass)
+
+```
+MCP smoke test → https://lumenbazaar-mcp.onrender.com/mcp
+  commit  : a1b2c3d4e5f6...
+  timeout : 10000ms per step
+
+  ✓ initialize (protocolVersion=2024-11-05) [312ms]
+  ✓ tools/list (count=5) [88ms]
+  ✓ tools/call inspect_budget [54ms]
+
+PASSED: all smoke steps passed.
+```
+
+Machine-readable JSON is printed to stdout:
+
+```json
+{
+  "smokeAt": "2026-10-17T00:00:00.000Z",
+  "url": "https://lumenbazaar-mcp.onrender.com/mcp",
+  "commit": "a1b2c3d4e5f6...",
+  "protocolVersion": "2024-11-05",
+  "toolCount": 5,
+  "steps": [
+    { "step": "initialize",                  "pass": true, "durationMs": 312 },
+    { "step": "tools/list",                  "pass": true, "durationMs": 88,  "detail": "count=5" },
+    { "step": "tools/call inspect_budget",   "pass": true, "durationMs": 54  }
+  ],
+  "pass": true
+}
+```
+
+### Failure: non-zero exit
+
+When any step fails the script exits with code 1 and marks `pass: false` in the JSON:
+
+```json
+{
+  "smokeAt": "...",
+  "url": "...",
+  "commit": "unknown",
+  "protocolVersion": null,
+  "toolCount": null,
+  "steps": [
+    { "step": "initialize", "pass": false, "durationMs": 2001, "detail": "initialize timed out after 2000ms" }
+  ],
+  "pass": false
+}
+```
+
+### Rollback
+
+If the smoke test fails after a deployment:
+
+1. Identify the last passing commit from the CI artifacts (`deployment-evidence/smoke-mode.json`).
+2. In the Render dashboard, navigate to the failing service → **Deploys** → select the last
+   passing deploy → **Rollback to this deploy**.
+3. Re-run the smoke test to confirm recovery:
+   ```bash
+   MCP_SMOKE_URL=https://lumenbazaar-mcp.onrender.com/mcp pnpm smoke:mcp
+   ```
 
 ## Endpoint Manifest
 

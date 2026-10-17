@@ -1,0 +1,132 @@
+services:
+  - type: web
+    name: lumenbazaar-backend
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    # Render injects $PORT for web services. Export it as API_PORT so the API
+    # binds on the port Render routes traffic to.
+    dockerCommand: sh -c "API_PORT=${PORT:-3000} pnpm start:api"
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: LUMEN_ENV
+        value: testnet
+      - key: API_HOST
+        value: 0.0.0.0
+      - key: API_PORT
+        # Fallback for local docker-compose. Render maps $PORT → API_PORT via dockerCommand.
+        value: "3000"
+      - key: API_PUBLIC_URL
+        sync: false
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: STELLAR_TESTNET_RPC_URL
+        value: https://soroban-testnet.stellar.org
+      - key: STELLAR_TESTNET_HORIZON_URL
+        value: https://horizon-testnet.stellar.org
+      - key: STELLAR_TESTNET_USDC_ISSUER
+        sync: false
+      - key: STELLAR_TESTNET_USDC_CONTRACT_ID
+        sync: false
+      - key: STELLAR_PUBNET_RPC_URL
+        value: https://mainnet.sorobanrpc.com
+      - key: STELLAR_PUBNET_HORIZON_URL
+        value: https://horizon.stellar.org
+      - key: STELLAR_PUBNET_USDC_ISSUER
+        sync: false
+      - key: STELLAR_PUBNET_USDC_CONTRACT_ID
+        value: ""
+      - key: ENABLE_UPTO_SCHEME
+        value: "false"
+      - key: DEFAULT_ASSET_CODE
+        value: LBT
+      - key: FACILITATOR_ACCOUNT
+        sync: false
+      - key: FACILITATOR_SIGNER_PROVIDER
+        value: environment
+      - key: FACILITATOR_SIGNER_NETWORK
+        value: stellar:testnet
+      - key: FACILITATOR_SIGNING_KEY
+        sync: false
+      - key: FACILITATOR_SIGNING_KEY_VERSION
+        sync: false
+      - key: STELLAR_MAX_TRANSACTION_FEE_STROOPS
+        value: "50000"
+      - key: STELLAR_INCLUSION_FEE_STROOPS
+        value: "100"
+      - key: EVENT_STREAM_SIGNING_SECRET
+        sync: false
+    healthCheckPath: /health
+
+  - type: web
+    name: lumenbazaar-mcp
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    # Override the Dockerfile CMD so this container runs the MCP HTTP server
+    # instead of the API. render.yaml dockerCommand maps to the Render
+    # "Start Command" override.
+    # Render injects $PORT for web services. We export it as MCP_PORT so the
+    # server binds on the port Render routes traffic to.
+    dockerCommand: sh -c "MCP_PORT=${PORT:-3001} pnpm start:mcp:http"
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: LUMEN_ENV
+        value: testnet
+      - key: MCP_HOST
+        value: 0.0.0.0
+      - key: MCP_PORT
+        # Render injects $PORT for web services. The dockerCommand above maps
+        # $PORT → MCP_PORT at startup so the server binds on the correct port.
+        # This static env var is a fallback for local docker-compose parity.
+        value: "3001"
+      - key: MCP_PATH
+        value: /mcp
+      - key: MCP_TRUST_PROXY
+        # Render sits behind its own TLS-terminating ingress and injects
+        # X-Forwarded-For with the actual client IP. Set true so the in-process
+        # rate limiter reads client IP from that header rather than the ingress
+        # socket address (which would lump all traffic under one key).
+        value: "true"
+      - key: MCP_PUBLIC_URL
+        sync: false
+      - key: MCP_ALLOWED_ORIGINS
+        # Restrict to trusted frontend origins; use comma-separated values.
+        # Wildcard (*) is intentionally NOT the default because MCP clients may
+        # send credentials via Mcp-Session-Id. Override in Render dashboard.
+        sync: false
+      - key: API_BASE_URL
+        sync: false
+      - key: STELLAR_TESTNET_RPC_URL
+        value: https://soroban-testnet.stellar.org
+      - key: STELLAR_TESTNET_HORIZON_URL
+        value: https://horizon-testnet.stellar.org
+      - key: STELLAR_TESTNET_USDC_ISSUER
+        sync: false
+      - key: STELLAR_TESTNET_USDC_CONTRACT_ID
+        sync: false
+      - key: STELLAR_PUBNET_RPC_URL
+        value: https://mainnet.sorobanrpc.com
+      - key: STELLAR_PUBNET_HORIZON_URL
+        value: https://horizon.stellar.org
+      - key: STELLAR_PUBNET_USDC_ISSUER
+        sync: false
+      - key: STELLAR_PUBNET_USDC_CONTRACT_ID
+        value: ""
+      - key: ENABLE_UPTO_SCHEME
+        value: "false"
+      - key: DEFAULT_ASSET_CODE
+        value: LBT
+      - key: FACILITATOR_ACCOUNT
+        sync: false
+      - key: FACILITATOR_SIGNER_NETWORK
+        value: stellar:testnet
+      - key: STELLAR_MAX_TRANSACTION_FEE_STROOPS
+        value: "50000"
+      - key: STELLAR_INCLUSION_FEE_STROOPS
+        value: "100"
+    healthCheckPath: /health
