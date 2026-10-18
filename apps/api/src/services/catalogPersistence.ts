@@ -194,6 +194,52 @@ export class PrismaResourceStore implements ResourceStore {
     return row === null ? undefined : mapResourceVersion(row);
   }
 
+  async getVersion(resourceId: string, version: number) {
+    const row = await this.db.resourceVersion.findFirst({
+      where: { resourceId, version }
+    });
+    return row === null ? undefined : mapResourceVersion(row);
+  }
+
+  async listVersions(resourceId: string) {
+    const rows = await this.db.resourceVersion.findMany({
+      where: { resourceId },
+      orderBy: { version: "asc" }
+    });
+    return rows.map(mapResourceVersion);
+  }
+
+  async rollbackResource(resourceId: string, patch: UpdateResourceInput, metadata: JsonObject) {
+    return this.db.$transaction(async (tx) => {
+      const resource = mapResource(
+        await tx.resource.update({
+          where: { id: resourceId },
+          data: resourceUpdateData(patch)
+        })
+      );
+      const latest = await tx.resourceVersion.aggregate({
+        where: { resourceId },
+        _max: { version: true }
+      });
+      const version = mapResourceVersion(
+        await tx.resourceVersion.create({
+          data: {
+            resourceId,
+            version: (latest._max.version ?? 0) + 1,
+            metadata: json(metadata)
+          }
+        })
+      );
+      await tx.resourceSchema.create({ data: resourceSchemaData(resource) });
+      await tx.paymentRequirement.create({ data: paymentRequirementData(resource) });
+      await tx.searchDocument.updateMany({
+        where: { resourceId },
+        data: { stale: true }
+      });
+      return { resource, version };
+    });
+  }
+
   async createSchema(resource: Resource) {
     return mapResourceSchema(
       await this.db.resourceSchema.create({ data: resourceSchemaData(resource) })

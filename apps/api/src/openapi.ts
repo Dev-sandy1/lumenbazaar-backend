@@ -191,6 +191,47 @@ const resource: SchemaObject = {
   }
 };
 
+const resourceVersion: SchemaObject = {
+  type: "object",
+  required: ["id", "resourceId", "version", "metadata", "createdAt"],
+  properties: {
+    id: { type: "string" },
+    resourceId: { type: "string" },
+    version: { type: "integer", minimum: 1 },
+    metadata: jsonObject,
+    createdAt: { type: "string", format: "date-time" }
+  }
+};
+
+const resourceVersionList: SchemaObject = {
+  type: "object",
+  required: ["versions"],
+  properties: {
+    versions: { type: "array", items: resourceVersion }
+  }
+};
+
+const rollbackResourceRequest: SchemaObject = {
+  type: "object",
+  required: ["version"],
+  properties: {
+    version: {
+      type: "integer",
+      minimum: 1,
+      description: "Historical version number to roll back to."
+    }
+  }
+};
+
+const rollbackResourceResponse: SchemaObject = {
+  type: "object",
+  required: ["resource", "version"],
+  properties: {
+    resource,
+    version: resourceVersion
+  }
+};
+
 const paymentRequirements: SchemaObject = {
   type: "object",
   additionalProperties: false,
@@ -703,6 +744,31 @@ export const apiRouteContracts: RouteContract[] = [
     summary: "Deactivate a paid resource.",
     tags: ["resources"],
     response: resource
+  },
+  {
+    method: "get",
+    path: "/v1/resources/{id}/versions",
+    operationId: "listResourceVersions",
+    summary: "List the immutable version history of a resource.",
+    tags: ["resources"],
+    response: resourceVersionList
+  },
+  {
+    method: "get",
+    path: "/v1/resources/{id}/versions/{version}",
+    operationId: "getResourceVersion",
+    summary: "Fetch a specific historical version of a resource.",
+    tags: ["resources"],
+    response: resourceVersion
+  },
+  {
+    method: "post",
+    path: "/v1/resources/{id}/rollback",
+    operationId: "rollbackResource",
+    summary: "Roll back a resource to a historical version, creating a new immutable version.",
+    tags: ["resources"],
+    requestBody: rollbackResourceRequest,
+    response: rollbackResourceResponse
   },
   {
     method: "get",
