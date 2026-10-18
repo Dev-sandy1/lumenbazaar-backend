@@ -30,6 +30,27 @@ export function registerResourceRoutes(app: FastifyInstance, options: ResourceRo
     return options.resourceService.deleteResource(params.id);
   });
 
+  app.get("/v1/resources/:id/versions", async (request) => {
+    const params = parseParams(request, z.object({ id: z.string().min(1) }));
+    return options.resourceService.listResourceVersions(params.id);
+  });
+
+  app.get("/v1/resources/:id/versions/:version", async (request) => {
+    const params = parseParams(
+      request,
+      z.object({ id: z.string().min(1), version: z.coerce.number().int().positive() })
+    );
+    return options.resourceService.getResourceVersion(params.id, params.version);
+  });
+
+  app.post("/v1/resources/:id/rollback", async (request) => {
+    const params = parseParams(
+      request,
+      z.object({ id: z.string().min(1), version: z.coerce.number().int().positive() })
+    );
+    return options.resourceService.rollbackResource(params.id, params.version);
+  });
+
   app.get("/v1/sellers/:sellerId/resources", async (request) => {
     const params = parseParams(request, z.object({ sellerId: z.string().min(1) }));
     const query = parseQuery(request, z.record(z.string(), z.unknown()));
