@@ -73,6 +73,13 @@ export type ResourceStore = {
   ) => Promise<{ resources: Resource[]; nextCursor: string | null }>;
   createVersion: (resource: Resource, metadata: JsonObject) => Promise<ResourceVersion>;
   getLatestVersion: (resourceId: string) => Promise<ResourceVersion | undefined>;
+  getVersion: (resourceId: string, version: number) => Promise<ResourceVersion | undefined>;
+  listVersions: (resourceId: string) => Promise<ResourceVersion[]>;
+  rollbackResource: (
+    resourceId: string,
+    patch: UpdateResourceInput,
+    metadata: JsonObject
+  ) => Promise<{ resource: Resource; version: ResourceVersion }>;
   createSchema: (resource: Resource) => Promise<ResourceSchema>;
   createPaymentRequirement: (resource: Resource) => Promise<PaymentRequirement>;
 };
@@ -199,6 +206,29 @@ export class InMemoryResourceStore implements ResourceStore {
     return this.versions.get(resourceId)?.at(-1);
   }
 
+  async getVersion(resourceId: string, version: number) {
+    return this.versions.get(resourceId)?.find((record) => record.version === version);
+  }
+
+  async listVersions(resourceId: string) {
+    return [...(this.versions.get(resourceId) ?? [])].sort((left, right) => left.version - right.version);
+  }
+
+  async rollbackResource(resourceId: string, patch: UpdateResourceInput, metadata: JsonObject) {
+    const existing = this.resources.get(resourceId);
+    if (existing === undefined) {
+      throw new LumenError("RESOURCE_NOT_FOUND", "Resource was not found.");
+    }
+    const updated: Resource = {
+      ...existing,
+      ...patch,
+      updatedAt: new Date().toISOString()
+    };
+    this.resources.set(resourceId, updated);
+    const version = await this.createVersion(updated, metadata);
+    return { resource: updated, version };
+  }
+
   async createSchema(resource: Resource) {
     const existing = this.schemas.get(resource.id) ?? [];
     const schema: ResourceSchema = {
@@ -283,6 +313,55 @@ export class ResourceService {
 
   async deleteResource(resourceId: string) {
     return this.updateResource(resourceId, { status: "inactive" });
+  }
+
+  async listResourceVersions(resourceId: string) {
+    await this.getResource(resourceId);
+    return this.store.listVersions(resourceId);
+  }
+
+  async getResourceVersion(resourceId: string, version: number) {
+    await this.getResource(resourceId);
+    const found = await this.store.getVersion(resourceId, version);
+    if (found === undefined) {
+      throw new LumenError("RESOURCE_VERSION_NOT_FOUND", "Resource version was not found.");
+    }
+    return found;
+  }
+
+  /**
+   * Roll back a resource to a historical version. The historical version is
+   * never modified; rollback creates a new immutable version containing the
+   * restored data and queues it for reindexing.
+   */
+  async rollbackResource(resourceId: string, targetVersion: number) {
+    await this.getResource(resourceId);
+    const target = await this.store.getVersion(resourceId, targetVersion);
+    if (target === undefined) {
+      throw new LumenError("RESOURCE_VERSION_NOT_FOUND", "Resource version was not found.");
+    }
+
+    const latest = await this.store.getLatestVersion(resourceId);
+    if (latest === undefined || target.version >= latest.version) {
+      throw new LumenError(
+        "CONFLICT",
+        "Can only roll back to an older historical version."
+      );
+    }
+
+    const metadata: JsonObject = {
+      ...target.metadata,
+      rolledBackFromVersion: target.version,
+      rolledBackAt: new Date().toISOString()
+    };
+
+    const { resource, version } = await this.store.rollbackResource(
+      resourceId,
+      target.metadata as unknown as UpdateResourceInput,
+      metadata
+    );
+    await this.queueLatestVersion(resource.id);
+    return { resource, version };
   }
 
   getStore() {

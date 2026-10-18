@@ -4761,6 +4761,470 @@
         }
       }
     },
+    "/v1/resources/{id}/versions": {
+      "get": {
+        "operationId": "listResourceVersions",
+        "summary": "List the immutable version history of a resource.",
+        "tags": ["resources"],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "headers": {
+              "x-ratelimit-limit": {
+                "description": "Maximum number of requests allowed in the current rate limit window.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-remaining": {
+                "description": "Number of requests remaining in the current rate limit window. Zero means limit reached.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-reset": {
+                "description": "ISO 8601 timestamp when the current rate limit window resets.",
+                "schema": { "type": "string", "format": "date-time" }
+              },
+              "retry-after": {
+                "description": "Number of seconds to wait before retrying. Only present in 429 responses. Per RFC 6585.",
+                "schema": { "type": "integer", "minimum": 1 }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["versions"],
+                  "properties": {
+                    "versions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["id", "resourceId", "version", "metadata", "createdAt"],
+                        "properties": {
+                          "id": { "type": "string" },
+                          "resourceId": { "type": "string" },
+                          "version": { "type": "integer", "minimum": 1 },
+                          "metadata": { "type": "object", "additionalProperties": true },
+                          "createdAt": { "type": "string", "format": "date-time" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded. The client must wait before retrying. See Retry-After header.",
+            "headers": {
+              "x-ratelimit-limit": {
+                "description": "Maximum number of requests allowed in the current rate limit window.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-remaining": {
+                "description": "Number of requests remaining in the current rate limit window. Zero means limit reached.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-reset": {
+                "description": "ISO 8601 timestamp when the current rate limit window resets.",
+                "schema": { "type": "string", "format": "date-time" }
+              },
+              "retry-after": {
+                "description": "Number of seconds to wait before retrying. Only present in 429 responses. Per RFC 6585.",
+                "schema": { "type": "integer", "minimum": 1 }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "error"],
+                  "properties": {
+                    "ok": { "type": "boolean", "enum": [false] },
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": { "type": "string" },
+                        "message": { "type": "string" },
+                        "details": { "type": "object", "additionalProperties": true }
+                      }
+                    },
+                    "requestId": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error response",
+            "headers": {
+              "x-ratelimit-limit": {
+                "description": "Maximum number of requests allowed in the current rate limit window.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-remaining": {
+                "description": "Number of requests remaining in the current rate limit window. Zero means limit reached.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-reset": {
+                "description": "ISO 8601 timestamp when the current rate limit window resets.",
+                "schema": { "type": "string", "format": "date-time" }
+              },
+              "retry-after": {
+                "description": "Number of seconds to wait before retrying. Only present in 429 responses. Per RFC 6585.",
+                "schema": { "type": "integer", "minimum": 1 }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "error"],
+                  "properties": {
+                    "ok": { "type": "boolean", "enum": [false] },
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": { "type": "string" },
+                        "message": { "type": "string" },
+                        "details": { "type": "object", "additionalProperties": true }
+                      }
+                    },
+                    "requestId": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/resources/{id}/versions/{version}": {
+      "get": {
+        "operationId": "getResourceVersion",
+        "summary": "Fetch a specific historical version of a resource.",
+        "tags": ["resources"],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "headers": {
+              "x-ratelimit-limit": {
+                "description": "Maximum number of requests allowed in the current rate limit window.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-remaining": {
+                "description": "Number of requests remaining in the current rate limit window. Zero means limit reached.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-reset": {
+                "description": "ISO 8601 timestamp when the current rate limit window resets.",
+                "schema": { "type": "string", "format": "date-time" }
+              },
+              "retry-after": {
+                "description": "Number of seconds to wait before retrying. Only present in 429 responses. Per RFC 6585.",
+                "schema": { "type": "integer", "minimum": 1 }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["id", "resourceId", "version", "metadata", "createdAt"],
+                  "properties": {
+                    "id": { "type": "string" },
+                    "resourceId": { "type": "string" },
+                    "version": { "type": "integer", "minimum": 1 },
+                    "metadata": { "type": "object", "additionalProperties": true },
+                    "createdAt": { "type": "string", "format": "date-time" }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded. The client must wait before retrying. See Retry-After header.",
+            "headers": {
+              "x-ratelimit-limit": {
+                "description": "Maximum number of requests allowed in the current rate limit window.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-remaining": {
+                "description": "Number of requests remaining in the current rate limit window. Zero means limit reached.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-reset": {
+                "description": "ISO 8601 timestamp when the current rate limit window resets.",
+                "schema": { "type": "string", "format": "date-time" }
+              },
+              "retry-after": {
+                "description": "Number of seconds to wait before retrying. Only present in 429 responses. Per RFC 6585.",
+                "schema": { "type": "integer", "minimum": 1 }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "error"],
+                  "properties": {
+                    "ok": { "type": "boolean", "enum": [false] },
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": { "type": "string" },
+                        "message": { "type": "string" },
+                        "details": { "type": "object", "additionalProperties": true }
+                      }
+                    },
+                    "requestId": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error response",
+            "headers": {
+              "x-ratelimit-limit": {
+                "description": "Maximum number of requests allowed in the current rate limit window.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-remaining": {
+                "description": "Number of requests remaining in the current rate limit window. Zero means limit reached.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-reset": {
+                "description": "ISO 8601 timestamp when the current rate limit window resets.",
+                "schema": { "type": "string", "format": "date-time" }
+              },
+              "retry-after": {
+                "description": "Number of seconds to wait before retrying. Only present in 429 responses. Per RFC 6585.",
+                "schema": { "type": "integer", "minimum": 1 }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "error"],
+                  "properties": {
+                    "ok": { "type": "boolean", "enum": [false] },
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": { "type": "string" },
+                        "message": { "type": "string" },
+                        "details": { "type": "object", "additionalProperties": true }
+                      }
+                    },
+                    "requestId": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/resources/{id}/rollback": {
+      "post": {
+        "operationId": "rollbackResource",
+        "summary": "Roll back a resource to a historical version, creating a new immutable version.",
+        "tags": ["resources"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["version"],
+                "properties": {
+                  "version": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Historical version number to roll back to."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "headers": {
+              "x-ratelimit-limit": {
+                "description": "Maximum number of requests allowed in the current rate limit window.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-remaining": {
+                "description": "Number of requests remaining in the current rate limit window. Zero means limit reached.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-reset": {
+                "description": "ISO 8601 timestamp when the current rate limit window resets.",
+                "schema": { "type": "string", "format": "date-time" }
+              },
+              "retry-after": {
+                "description": "Number of seconds to wait before retrying. Only present in 429 responses. Per RFC 6585.",
+                "schema": { "type": "integer", "minimum": 1 }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["resource", "version"],
+                  "properties": {
+                    "resource": {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "sellerId",
+                        "type",
+                        "name",
+                        "description",
+                        "url",
+                        "routeTemplate",
+                        "network",
+                        "payTo",
+                        "assetCode",
+                        "assetIssuer",
+                        "amount",
+                        "inputSchema",
+                        "outputSchema",
+                        "extensions",
+                        "status"
+                      ],
+                      "properties": {
+                        "id": { "type": "string" },
+                        "sellerId": { "type": "string" },
+                        "type": { "type": "string", "enum": ["http", "mcp"] },
+                        "name": { "type": "string" },
+                        "description": { "type": "string" },
+                        "url": { "type": "string", "format": "uri" },
+                        "routeTemplate": { "type": "string" },
+                        "network": {
+                          "type": "string",
+                          "enum": ["stellar:testnet", "stellar:pubnet"]
+                        },
+                        "payTo": { "type": "string" },
+                        "assetCode": { "type": "string" },
+                        "assetIssuer": { "type": "string" },
+                        "amount": { "type": "string" },
+                        "inputSchema": { "type": "object", "additionalProperties": true },
+                        "outputSchema": { "type": "object", "additionalProperties": true },
+                        "extensions": { "type": "object", "additionalProperties": true },
+                        "status": { "type": "string", "enum": ["draft", "active", "inactive"] },
+                        "createdAt": { "type": "string", "format": "date-time" },
+                        "updatedAt": { "type": "string", "format": "date-time" }
+                      }
+                    },
+                    "version": {
+                      "type": "object",
+                      "required": ["id", "resourceId", "version", "metadata", "createdAt"],
+                      "properties": {
+                        "id": { "type": "string" },
+                        "resourceId": { "type": "string" },
+                        "version": { "type": "integer", "minimum": 1 },
+                        "metadata": { "type": "object", "additionalProperties": true },
+                        "createdAt": { "type": "string", "format": "date-time" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded. The client must wait before retrying. See Retry-After header.",
+            "headers": {
+              "x-ratelimit-limit": {
+                "description": "Maximum number of requests allowed in the current rate limit window.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-remaining": {
+                "description": "Number of requests remaining in the current rate limit window. Zero means limit reached.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-reset": {
+                "description": "ISO 8601 timestamp when the current rate limit window resets.",
+                "schema": { "type": "string", "format": "date-time" }
+              },
+              "retry-after": {
+                "description": "Number of seconds to wait before retrying. Only present in 429 responses. Per RFC 6585.",
+                "schema": { "type": "integer", "minimum": 1 }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "error"],
+                  "properties": {
+                    "ok": { "type": "boolean", "enum": [false] },
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": { "type": "string" },
+                        "message": { "type": "string" },
+                        "details": { "type": "object", "additionalProperties": true }
+                      }
+                    },
+                    "requestId": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error response",
+            "headers": {
+              "x-ratelimit-limit": {
+                "description": "Maximum number of requests allowed in the current rate limit window.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-remaining": {
+                "description": "Number of requests remaining in the current rate limit window. Zero means limit reached.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-reset": {
+                "description": "ISO 8601 timestamp when the current rate limit window resets.",
+                "schema": { "type": "string", "format": "date-time" }
+              },
+              "retry-after": {
+                "description": "Number of seconds to wait before retrying. Only present in 429 responses. Per RFC 6585.",
+                "schema": { "type": "integer", "minimum": 1 }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "error"],
+                  "properties": {
+                    "ok": { "type": "boolean", "enum": [false] },
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": { "type": "string" },
+                        "message": { "type": "string" },
+                        "details": { "type": "object", "additionalProperties": true }
+                      }
+                    },
+                    "requestId": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/sellers/{sellerId}/resources": {
       "get": {
         "operationId": "listSellerResources",
