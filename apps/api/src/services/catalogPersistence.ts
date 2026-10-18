@@ -7,6 +7,7 @@ import { Redis } from "ioredis";
 import {
   decodeCursor,
   encodeCursor,
+  isSellerApiKeyScope,
   isSupportedNetwork,
   LumenError,
   normalizeLimit,
@@ -19,6 +20,8 @@ import {
   type ResourceVersion,
   type SearchDocument,
   type Seller,
+  type SellerApiKey,
+  type SellerApiKeyScope,
   type SellerDomain
 } from "@lumenbazaar/shared";
 
@@ -38,7 +41,15 @@ import {
   type ResourceStore,
   type UpdateResourceInput
 } from "./resources.js";
-import { InMemorySearchDocumentStore, type SearchDocumentStore } from "./search.js";
+import {
+  InMemorySearchDocumentStore,
+  type SearchDocumentStore
+} from "./search.js";
+import {
+  InMemorySellerApiKeyStore,
+  type SellerApiKeyRecord,
+  type SellerApiKeyStore
+} from "./sellerApiKeys.js";
 import { InMemorySellerStore, type CreateSellerInput, type SellerStore } from "./sellers.js";
 
 export class PrismaSellerStore implements SellerStore {
@@ -207,6 +218,75 @@ export class PrismaResourceStore implements ResourceStore {
   }
 }
 
+export class PrismaSellerApiKeyStore implements SellerApiKeyStore {
+  constructor(private readonly db: PrismaClient) {}
+
+  async create(input: {
+    sellerId: string;
+    name: string;
+    keyPrefix: string;
+    keyHash: string;
+    scopes: SellerApiKeyScope[];
+    expiresAt: Date | null;
+  }) {
+    return mapSellerApiKey(
+      await this.db.sellerApiKey.create({
+        data: {
+          sellerId: input.sellerId,
+          name: input.name,
+          keyPrefix: input.keyPrefix,
+          keyHash: input.keyHash,
+          scopes: input.scopes as unknown as Prisma.InputJsonValue,
+          expiresAt: input.expiresAt
+        }
+      })
+    );
+  }
+
+  async list(sellerId: string) {
+    const rows = await this.db.sellerApiKey.findMany({
+      where: { sellerId },
+      orderBy: { createdAt: "desc" }
+    });
+    return rows.map(mapSellerApiKey);
+  }
+
+  async get(keyId: string) {
+    const row = await this.db.sellerApiKey.findUnique({ where: { id: keyId } });
+    return row === null ? undefined : mapSellerApiKey(row);
+  }
+
+  async findByPrefix(keyPrefix: string) {
+    const rows = await this.db.sellerApiKey.findMany({ where: { keyPrefix } });
+    return rows.map(mapSellerApiKey);
+  }
+
+  async markRevoked(keyId: string, revokedAt: Date) {
+    return mapSellerApiKey(
+      await this.db.sellerApiKey.update({
+        where: { id: keyId },
+        data: { status: "revoked", revokedAt }
+      })
+    );
+  }
+
+  async markRotatedOut(keyId: string, rotatedOutAt: Date) {
+    return mapSellerApiKey(
+      await this.db.sellerApiKey.update({
+        where: { id: keyId },
+        data: { rotatedOutAt }
+      })
+    );
+  }
+
+  async touchLastUsed(keyId: string, lastUsedAt: Date) {
+    await this.db.sellerApiKey.updateMany({
+      where: { id: keyId },
+      data: { lastUsedAt }
+    });
+  }
+}
+
 export class PrismaCatalogEventStore implements CatalogEventStore {
   constructor(private readonly db: PrismaClient) {}
 
@@ -275,9 +355,10 @@ export function createCatalogPersistence(config: AppConfig) {
     config.nodeEnv !== "production" ||
     config.lumenEnv === "local"
   ) {
-    return {
-      sellerStore: new InMemorySellerStore() as SellerStore,
-      resourceStore: new InMemoryResourceStore() as ResourceStore,
+  return {
+    sellerStore: new InMemorySellerStore() as SellerStore,
+    sellerApiKeyStore: new InMemorySellerApiKeyStore() as SellerApiKeyStore,
+    resourceStore: new InMemoryResourceStore() as ResourceStore,
       eventStore: new InMemoryCatalogEventStore() as CatalogEventStore,
       searchDocumentStore: new InMemorySearchDocumentStore() as SearchDocumentStore,
       indexingQueue: new InMemoryResourceIndexingQueue() as ResourceIndexingQueue,
@@ -290,6 +371,7 @@ export function createCatalogPersistence(config: AppConfig) {
   const queue = new Queue<ResourceIndexingJob>("resource-indexing", { connection: redis });
   return {
     sellerStore: new PrismaSellerStore(db) as SellerStore,
+    sellerApiKeyStore: new PrismaSellerApiKeyStore(db) as SellerApiKeyStore,
     resourceStore: new PrismaResourceStore(db) as ResourceStore,
     eventStore: new PrismaCatalogEventStore(db) as CatalogEventStore,
     searchDocumentStore: new PrismaSearchDocumentStore(db) as SearchDocumentStore,
@@ -434,6 +516,31 @@ function mapSearchDocument(row: Prisma.SearchDocumentGetPayload<object>): Search
     ...row,
     ranking: row.ranking as JsonObject,
     indexedAt: row.indexedAt?.toISOString() ?? null,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString()
+  };
+}
+
+function mapSellerApiKey(row: Prisma.SellerApiKeyGetPayload<object>): SellerApiKeyRecord {
+  const scopes = row.scopes as unknown;
+  if (
+    !Array.isArray(scopes) ||
+    scopes.some((scope) => typeof scope !== "string" || !isSellerApiKeyScope(scope))
+  ) {
+    throw new Error("Stored seller API key scopes are invalid.");
+  }
+  return {
+    id: row.id,
+    sellerId: row.sellerId,
+    name: row.name,
+    keyPrefix: row.keyPrefix,
+    keyHash: row.keyHash,
+    scopes: scopes as SellerApiKeyScope[],
+    status: row.status as SellerApiKey["status"],
+    expiresAt: row.expiresAt?.toISOString() ?? null,
+    lastUsedAt: row.lastUsedAt?.toISOString() ?? null,
+    revokedAt: row.revokedAt?.toISOString() ?? null,
+    rotatedOutAt: row.rotatedOutAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString()
   };

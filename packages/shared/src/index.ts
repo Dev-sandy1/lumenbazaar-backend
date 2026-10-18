@@ -15,4 +15,5 @@ export * from "./db/client.js";
 export * from "./db/outbox.js";
 export * from "./retentionPolicy.js";
 export * from "./routeTemplates.js";
+export * from "./sellerApiKeys.js";
 export * from "./webhooks.js";

@@ -17,7 +17,7 @@
         "x-ratelimit-reset: ISO 8601 timestamp when window resets",
         "retry-after: Seconds to wait before retrying (429 responses only, RFC 6585)"
       ],
-      "identification": "Rate limits are identified by x-api-key header if present, otherwise by request IP address (x-forwarded-for not trusted)",
+      "identification": "Authenticated seller API keys are identified by their key ID; other requests use the x-api-key header value if present, otherwise by request IP address (x-forwarded-for not trusted)",
       "behavior": "During Redis unavailability, rate limiting degrades to in-memory per-instance limits, prioritizing availability over perfect enforcement"
     }
   },
@@ -191,165 +191,199 @@
                   "type": "object",
                   "required": ["ok", "environment", "checks", "capabilities"],
                   "properties": {
-                    "ok": { "type": "boolean", "description": "true only when all required dependencies are ready." },
-                    "environment": { "type": "string", "enum": ["local", "testnet", "staging", "mainnet"] },
-                    "checks": {
-                      "type": "object",
-                      "required": ["database", "redis", "stellarRpc", "horizon", "signer", "migrations", "assets"],
-                      "properties": {
-                        "database": {
-                          "type": "object",
-                          "required": ["status"],
-                          "properties": {
-                            "status": { "type": "string", "enum": ["ready", "unavailable", "timeout", "not_configured", "not_required"] },
-                            "latencyMs": { "type": "integer", "minimum": 0, "description": "Elapsed probe time in ms. Omitted when status is not_required or not_configured." },
-                            "reason": { "type": "string", "description": "Stable, generic reason code. Never includes raw error messages, hostnames, credentials, or stack traces." }
-                          }
-                        },
-                        "redis": {
-                          "type": "object",
-                          "required": ["status"],
-                          "properties": {
-                            "status": { "type": "string", "enum": ["ready", "unavailable", "timeout", "not_configured", "not_required"] },
-                            "latencyMs": { "type": "integer", "minimum": 0, "description": "Elapsed probe time in ms. Omitted when status is not_required or not_configured." },
-                            "reason": { "type": "string", "description": "Stable, generic reason code. Never includes raw error messages, hostnames, credentials, or stack traces." }
-                          }
-                        },
-                        "stellarRpc": {
-                          "type": "object",
-                          "required": ["status"],
-                          "properties": {
-                            "status": { "type": "string", "enum": ["ready", "unavailable", "timeout", "not_configured", "not_required"] },
-                            "latencyMs": { "type": "integer", "minimum": 0, "description": "Elapsed probe time in ms. Omitted when status is not_required or not_configured." },
-                            "reason": { "type": "string", "description": "Stable, generic reason code. Never includes raw error messages, hostnames, credentials, or stack traces." }
-                          }
-                        },
-                        "horizon": {
-                          "type": "object",
-                          "required": ["status"],
-                          "properties": {
-                            "status": { "type": "string", "enum": ["ready", "unavailable", "timeout", "not_configured", "not_required"] },
-                            "latencyMs": { "type": "integer", "minimum": 0, "description": "Elapsed probe time in ms. Omitted when status is not_required or not_configured." },
-                            "reason": { "type": "string", "description": "Stable, generic reason code. Never includes raw error messages, hostnames, credentials, or stack traces." }
-                          }
-                        },
-                        "signer": {
-                          "type": "object",
-                          "required": ["status"],
-                          "properties": {
-                            "status": { "type": "string", "enum": ["ready", "unavailable", "timeout", "not_configured", "not_required"] },
-                            "latencyMs": { "type": "integer", "minimum": 0, "description": "Elapsed probe time in ms. Omitted when status is not_required or not_configured." },
-                            "reason": { "type": "string", "description": "Stable, generic reason code. Never includes raw error messages, hostnames, credentials, or stack traces." }
-                          }
-                        },
-                        "migrations": {
-                          "type": "object",
-                          "required": ["status"],
-                          "properties": {
-                            "status": { "type": "string", "enum": ["ready", "unavailable", "timeout", "not_configured", "not_required"] },
-                            "latencyMs": { "type": "integer", "minimum": 0, "description": "Elapsed probe time in ms. Omitted when status is not_required or not_configured." },
-                            "reason": { "type": "string", "description": "Stable, generic reason code. Never includes raw error messages, hostnames, credentials, or stack traces." }
-                          }
-                        },
-                        "assets": {
-                          "type": "object",
-                          "required": ["status"],
-                          "properties": {
-                            "status": { "type": "string", "enum": ["ready", "unavailable", "timeout", "not_configured", "not_required"] },
-                            "latencyMs": { "type": "integer", "minimum": 0, "description": "Elapsed probe time in ms. Omitted when status is not_required or not_configured." },
-                            "reason": { "type": "string", "description": "Stable, generic reason code. Never includes raw error messages, hostnames, credentials, or stack traces." }
-                          }
-                        }
-                      }
+                    "ok": {
+                      "type": "boolean",
+                      "description": "true only when all required dependencies are ready."
                     },
-                    "capabilities": {
-                      "type": "object",
-                      "required": ["exact", "upto"],
-                      "properties": {
-                        "exact": { "type": "boolean" },
-                        "upto": { "type": "boolean" }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Service Unavailable. One or more required dependencies are not ready. Response body has the same shape as 200 with ok: false.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": ["ok", "environment", "checks", "capabilities"],
-                  "properties": {
-                    "ok": { "type": "boolean", "description": "true only when all required dependencies are ready." },
-                    "environment": { "type": "string", "enum": ["local", "testnet", "staging", "mainnet"] },
+                    "environment": {
+                      "type": "string",
+                      "enum": ["local", "testnet", "staging", "mainnet"]
+                    },
                     "checks": {
                       "type": "object",
-                      "required": ["database", "redis", "stellarRpc", "horizon", "signer", "migrations", "assets"],
+                      "required": [
+                        "database",
+                        "redis",
+                        "stellarRpc",
+                        "horizon",
+                        "signer",
+                        "migrations",
+                        "assets"
+                      ],
                       "properties": {
                         "database": {
                           "type": "object",
                           "required": ["status"],
                           "properties": {
-                            "status": { "type": "string", "enum": ["ready", "unavailable", "timeout", "not_configured", "not_required"] },
-                            "latencyMs": { "type": "integer", "minimum": 0, "description": "Elapsed probe time in ms. Omitted when status is not_required or not_configured." },
-                            "reason": { "type": "string", "description": "Stable, generic reason code. Never includes raw error messages, hostnames, credentials, or stack traces." }
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "ready",
+                                "unavailable",
+                                "timeout",
+                                "not_configured",
+                                "not_required"
+                              ]
+                            },
+                            "latencyMs": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Elapsed probe time in ms. Omitted when status is not_required or not_configured."
+                            },
+                            "reason": {
+                              "type": "string",
+                              "description": "Stable, generic reason code. Never includes raw error messages, hostnames, credentials, or stack traces."
+                            }
                           }
                         },
                         "redis": {
                           "type": "object",
                           "required": ["status"],
                           "properties": {
-                            "status": { "type": "string", "enum": ["ready", "unavailable", "timeout", "not_configured", "not_required"] },
-                            "latencyMs": { "type": "integer", "minimum": 0, "description": "Elapsed probe time in ms. Omitted when status is not_required or not_configured." },
-                            "reason": { "type": "string", "description": "Stable, generic reason code. Never includes raw error messages, hostnames, credentials, or stack traces." }
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "ready",
+                                "unavailable",
+                                "timeout",
+                                "not_configured",
+                                "not_required"
+                              ]
+                            },
+                            "latencyMs": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Elapsed probe time in ms. Omitted when status is not_required or not_configured."
+                            },
+                            "reason": {
+                              "type": "string",
+                              "description": "Stable, generic reason code. Never includes raw error messages, hostnames, credentials, or stack traces."
+                            }
                           }
                         },
                         "stellarRpc": {
                           "type": "object",
                           "required": ["status"],
                           "properties": {
-                            "status": { "type": "string", "enum": ["ready", "unavailable", "timeout", "not_configured", "not_required"] },
-                            "latencyMs": { "type": "integer", "minimum": 0, "description": "Elapsed probe time in ms. Omitted when status is not_required or not_configured." },
-                            "reason": { "type": "string", "description": "Stable, generic reason code. Never includes raw error messages, hostnames, credentials, or stack traces." }
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "ready",
+                                "unavailable",
+                                "timeout",
+                                "not_configured",
+                                "not_required"
+                              ]
+                            },
+                            "latencyMs": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Elapsed probe time in ms. Omitted when status is not_required or not_configured."
+                            },
+                            "reason": {
+                              "type": "string",
+                              "description": "Stable, generic reason code. Never includes raw error messages, hostnames, credentials, or stack traces."
+                            }
                           }
                         },
                         "horizon": {
                           "type": "object",
                           "required": ["status"],
                           "properties": {
-                            "status": { "type": "string", "enum": ["ready", "unavailable", "timeout", "not_configured", "not_required"] },
-                            "latencyMs": { "type": "integer", "minimum": 0, "description": "Elapsed probe time in ms. Omitted when status is not_required or not_configured." },
-                            "reason": { "type": "string", "description": "Stable, generic reason code. Never includes raw error messages, hostnames, credentials, or stack traces." }
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "ready",
+                                "unavailable",
+                                "timeout",
+                                "not_configured",
+                                "not_required"
+                              ]
+                            },
+                            "latencyMs": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Elapsed probe time in ms. Omitted when status is not_required or not_configured."
+                            },
+                            "reason": {
+                              "type": "string",
+                              "description": "Stable, generic reason code. Never includes raw error messages, hostnames, credentials, or stack traces."
+                            }
                           }
                         },
                         "signer": {
                           "type": "object",
                           "required": ["status"],
                           "properties": {
-                            "status": { "type": "string", "enum": ["ready", "unavailable", "timeout", "not_configured", "not_required"] },
-                            "latencyMs": { "type": "integer", "minimum": 0, "description": "Elapsed probe time in ms. Omitted when status is not_required or not_configured." },
-                            "reason": { "type": "string", "description": "Stable, generic reason code. Never includes raw error messages, hostnames, credentials, or stack traces." }
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "ready",
+                                "unavailable",
+                                "timeout",
+                                "not_configured",
+                                "not_required"
+                              ]
+                            },
+                            "latencyMs": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Elapsed probe time in ms. Omitted when status is not_required or not_configured."
+                            },
+                            "reason": {
+                              "type": "string",
+                              "description": "Stable, generic reason code. Never includes raw error messages, hostnames, credentials, or stack traces."
+                            }
                           }
                         },
                         "migrations": {
                           "type": "object",
                           "required": ["status"],
                           "properties": {
-                            "status": { "type": "string", "enum": ["ready", "unavailable", "timeout", "not_configured", "not_required"] },
-                            "latencyMs": { "type": "integer", "minimum": 0, "description": "Elapsed probe time in ms. Omitted when status is not_required or not_configured." },
-                            "reason": { "type": "string", "description": "Stable, generic reason code. Never includes raw error messages, hostnames, credentials, or stack traces." }
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "ready",
+                                "unavailable",
+                                "timeout",
+                                "not_configured",
+                                "not_required"
+                              ]
+                            },
+                            "latencyMs": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Elapsed probe time in ms. Omitted when status is not_required or not_configured."
+                            },
+                            "reason": {
+                              "type": "string",
+                              "description": "Stable, generic reason code. Never includes raw error messages, hostnames, credentials, or stack traces."
+                            }
                           }
                         },
                         "assets": {
                           "type": "object",
                           "required": ["status"],
                           "properties": {
-                            "status": { "type": "string", "enum": ["ready", "unavailable", "timeout", "not_configured", "not_required"] },
-                            "latencyMs": { "type": "integer", "minimum": 0, "description": "Elapsed probe time in ms. Omitted when status is not_required or not_configured." },
-                            "reason": { "type": "string", "description": "Stable, generic reason code. Never includes raw error messages, hostnames, credentials, or stack traces." }
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "ready",
+                                "unavailable",
+                                "timeout",
+                                "not_configured",
+                                "not_required"
+                              ]
+                            },
+                            "latencyMs": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Elapsed probe time in ms. Omitted when status is not_required or not_configured."
+                            },
+                            "reason": {
+                              "type": "string",
+                              "description": "Stable, generic reason code. Never includes raw error messages, hostnames, credentials, or stack traces."
+                            }
                           }
                         }
                       }
@@ -404,6 +438,224 @@
                       }
                     },
                     "requestId": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable. One or more required dependencies are not ready. Response body has the same shape as 200 with ok: false.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "environment", "checks", "capabilities"],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "description": "true only when all required dependencies are ready."
+                    },
+                    "environment": {
+                      "type": "string",
+                      "enum": ["local", "testnet", "staging", "mainnet"]
+                    },
+                    "checks": {
+                      "type": "object",
+                      "required": [
+                        "database",
+                        "redis",
+                        "stellarRpc",
+                        "horizon",
+                        "signer",
+                        "migrations",
+                        "assets"
+                      ],
+                      "properties": {
+                        "database": {
+                          "type": "object",
+                          "required": ["status"],
+                          "properties": {
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "ready",
+                                "unavailable",
+                                "timeout",
+                                "not_configured",
+                                "not_required"
+                              ]
+                            },
+                            "latencyMs": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Elapsed probe time in ms. Omitted when status is not_required or not_configured."
+                            },
+                            "reason": {
+                              "type": "string",
+                              "description": "Stable, generic reason code. Never includes raw error messages, hostnames, credentials, or stack traces."
+                            }
+                          }
+                        },
+                        "redis": {
+                          "type": "object",
+                          "required": ["status"],
+                          "properties": {
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "ready",
+                                "unavailable",
+                                "timeout",
+                                "not_configured",
+                                "not_required"
+                              ]
+                            },
+                            "latencyMs": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Elapsed probe time in ms. Omitted when status is not_required or not_configured."
+                            },
+                            "reason": {
+                              "type": "string",
+                              "description": "Stable, generic reason code. Never includes raw error messages, hostnames, credentials, or stack traces."
+                            }
+                          }
+                        },
+                        "stellarRpc": {
+                          "type": "object",
+                          "required": ["status"],
+                          "properties": {
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "ready",
+                                "unavailable",
+                                "timeout",
+                                "not_configured",
+                                "not_required"
+                              ]
+                            },
+                            "latencyMs": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Elapsed probe time in ms. Omitted when status is not_required or not_configured."
+                            },
+                            "reason": {
+                              "type": "string",
+                              "description": "Stable, generic reason code. Never includes raw error messages, hostnames, credentials, or stack traces."
+                            }
+                          }
+                        },
+                        "horizon": {
+                          "type": "object",
+                          "required": ["status"],
+                          "properties": {
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "ready",
+                                "unavailable",
+                                "timeout",
+                                "not_configured",
+                                "not_required"
+                              ]
+                            },
+                            "latencyMs": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Elapsed probe time in ms. Omitted when status is not_required or not_configured."
+                            },
+                            "reason": {
+                              "type": "string",
+                              "description": "Stable, generic reason code. Never includes raw error messages, hostnames, credentials, or stack traces."
+                            }
+                          }
+                        },
+                        "signer": {
+                          "type": "object",
+                          "required": ["status"],
+                          "properties": {
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "ready",
+                                "unavailable",
+                                "timeout",
+                                "not_configured",
+                                "not_required"
+                              ]
+                            },
+                            "latencyMs": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Elapsed probe time in ms. Omitted when status is not_required or not_configured."
+                            },
+                            "reason": {
+                              "type": "string",
+                              "description": "Stable, generic reason code. Never includes raw error messages, hostnames, credentials, or stack traces."
+                            }
+                          }
+                        },
+                        "migrations": {
+                          "type": "object",
+                          "required": ["status"],
+                          "properties": {
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "ready",
+                                "unavailable",
+                                "timeout",
+                                "not_configured",
+                                "not_required"
+                              ]
+                            },
+                            "latencyMs": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Elapsed probe time in ms. Omitted when status is not_required or not_configured."
+                            },
+                            "reason": {
+                              "type": "string",
+                              "description": "Stable, generic reason code. Never includes raw error messages, hostnames, credentials, or stack traces."
+                            }
+                          }
+                        },
+                        "assets": {
+                          "type": "object",
+                          "required": ["status"],
+                          "properties": {
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "ready",
+                                "unavailable",
+                                "timeout",
+                                "not_configured",
+                                "not_required"
+                              ]
+                            },
+                            "latencyMs": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Elapsed probe time in ms. Omitted when status is not_required or not_configured."
+                            },
+                            "reason": {
+                              "type": "string",
+                              "description": "Stable, generic reason code. Never includes raw error messages, hostnames, credentials, or stack traces."
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "capabilities": {
+                      "type": "object",
+                      "required": ["exact", "upto"],
+                      "properties": {
+                        "exact": { "type": "boolean" },
+                        "upto": { "type": "boolean" }
+                      }
+                    }
                   }
                 }
               }
@@ -1418,135 +1670,28 @@
         }
       }
     },
-    "/v1/receipts/{receiptId}/verify": {
-      "get": {
-        "operationId": "verifyReceipt",
-        "summary": "Verify a receipt against persisted evidence records and return a versioned digest.",
-        "description": "Deterministic, read-only operation that verifies a receipt by re-deriving evidence from persisted payment attempt, settlement, transaction, and ledger records. Returns field-level consistency results and a reproducible digest.\n\nThe digest is computed using canonical evidence encoding (SHA-256) with fixed field order, no insignificant whitespace, UTF-8 encoding, decimal amounts as strings, timestamps in ISO 8601 format, and explicit null handling.\n\nPending receipts are never verified. Incomplete or conflicting evidence fails closed. Missing evidence (transaction hash or ledger) for finalized receipts results in not-verified status.\n\n**Important:** The digest is an integrity aid and does NOT replace Stellar ledger verification. Receivers who need ledger-level assurance must verify against the Stellar ledger.",
+    "/v1/receipts/{receiptId}/stream-access": {
+      "post": {
+        "operationId": "createReceiptStreamAccessGrant",
+        "summary": "Mint a short-lived grant for a receipt status event stream.",
         "tags": ["facilitator"],
-        "parameters": [
-          {
-            "name": "receiptId",
-            "in": "path",
-            "required": true,
-            "schema": { "type": "string", "minLength": 1 }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Verification completed. Check 'verified' field to determine result.",
-            "headers": {
-              "x-correlation-id": {
-                "description": "Correlation ID from the receipt.",
-                "schema": { "type": "string" }
-              },
-              "x-ratelimit-limit": {
-                "description": "Maximum number of requests allowed in the current rate limit window.",
-                "schema": { "type": "integer" }
-              },
-              "x-ratelimit-remaining": {
-                "description": "Number of requests remaining in the current rate limit window. Zero means limit reached.",
-                "schema": { "type": "integer" }
-              },
-              "x-ratelimit-reset": {
-                "description": "ISO 8601 timestamp when the current rate limit window resets.",
-                "schema": { "type": "string", "format": "date-time" }
-              },
-              "retry-after": {
-                "description": "Number of seconds to wait before retrying. Only present in 429 responses. Per RFC 6585.",
-                "schema": { "type": "integer", "minimum": 1 }
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": ["verified", "receiptStatus", "fields"],
-                  "properties": {
-                    "verified": {
-                      "type": "boolean",
-                      "description": "Overall verification result. True only if all evidence matches and receipt is finalized."
-                    },
-                    "digest": {
-                      "type": "object",
-                      "description": "Versioned digest (present only if verified and finalized). Third parties can reproduce this digest by applying canonical encoding to the same evidence.",
-                      "required": ["value", "version", "algorithm"],
-                      "properties": {
-                        "value": {
-                          "type": "string",
-                          "description": "Hex-encoded SHA-256 digest of canonical evidence.",
-                          "pattern": "^[a-f0-9]{64}$"
-                        },
-                        "version": {
-                          "type": "string",
-                          "enum": ["1.0"],
-                          "description": "Encoding version for reproducible digest computation."
-                        },
-                        "algorithm": {
-                          "type": "string",
-                          "enum": ["SHA-256"],
-                          "description": "Hash algorithm used for digest."
-                        }
-                      }
-                    },
-                    "receiptStatus": {
-                      "type": "string",
-                      "enum": ["pending", "finalized"],
-                      "description": "Receipt lifecycle status."
-                    },
-                    "settlementState": {
-                      "type": "string",
-                      "enum": ["pending", "reconciled", "not_required", "needs_review"],
-                      "description": "Settlement reconciliation state (if settlement exists)."
-                    },
-                    "fields": {
-                      "type": "array",
-                      "description": "Field-level verification results. Each field compared between stored receipt and re-derived values.",
-                      "items": {
-                        "type": "object",
-                        "required": ["field", "status"],
-                        "properties": {
-                          "field": {
-                            "type": "string",
-                            "description": "Field name (e.g., 'transactionHash', 'amount', 'ledger', 'digest')."
-                          },
-                          "status": {
-                            "type": "string",
-                            "enum": ["match", "mismatch", "missing"],
-                            "description": "Field verification status: match (field matches derived value), mismatch (field differs from derived value), missing (required field absent)."
-                          },
-                          "reason": {
-                            "type": "string",
-                            "description": "Human-readable explanation of field status."
-                          }
-                        }
-                      }
-                    },
-                    "reason": {
-                      "type": "string",
-                      "enum": [
-                        "no_settlement",
-                        "incomplete_evidence",
-                        "field_mismatch",
-                        "pending_receipt",
-                        "unsupported_network",
-                        "evidence_hash_invalid",
-                        "authorization_failed",
-                        "not_found"
-                      ],
-                      "description": "Reason code if not verified. Absent if verified=true."
-                    },
-                    "reasonMessage": {
-                      "type": "string",
-                      "description": "Human-readable reason if not verified. Absent if verified=true."
-                    }
-                  }
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "ttlSeconds": { "type": "integer", "minimum": 1, "maximum": 900, "default": 300 }
                 }
               }
             }
-          },
-          "404": {
-            "description": "Receipt not found.",
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
             "headers": {
               "x-ratelimit-limit": {
                 "description": "Maximum number of requests allowed in the current rate limit window.",
@@ -1569,19 +1714,16 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["ok", "error"],
+                  "required": ["token", "scope", "subjectId", "expiresAt", "streamPath"],
                   "properties": {
-                    "ok": { "type": "boolean", "enum": [false] },
-                    "error": {
-                      "type": "object",
-                      "required": ["code", "message"],
-                      "properties": {
-                        "code": { "type": "string" },
-                        "message": { "type": "string" },
-                        "details": { "type": "object", "additionalProperties": true }
-                      }
+                    "token": {
+                      "type": "string",
+                      "description": "Short-lived signed grant presented as a Bearer token or access_token query."
                     },
-                    "requestId": { "type": "string" }
+                    "scope": { "type": "string", "enum": ["receipt", "seller"] },
+                    "subjectId": { "type": "string" },
+                    "expiresAt": { "type": "string", "format": "date-time" },
+                    "streamPath": { "type": "string" }
                   }
                 }
               }
@@ -1674,49 +1816,61 @@
         }
       }
     },
-    "/v1/receipts/{receiptId}/stream-access": {
-      "post": {
-        "operationId": "createReceiptStreamAccessGrant",
-        "summary": "Mint a short-lived grant for a receipt status event stream.",
+    "/v1/receipts/{receiptId}/stream": {
+      "get": {
+        "operationId": "streamReceiptStatusEvents",
+        "summary": "Stream authorized receipt status updates until the receipt reaches a final state.",
         "tags": ["facilitator"],
-        "requestBody": {
-          "required": false,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "additionalProperties": false,
-                "properties": {
-                  "ttlSeconds": { "type": "integer", "minimum": 1, "maximum": 900, "default": 300 }
-                }
-              }
-            }
-          }
-        },
         "responses": {
           "200": {
-            "description": "Successful response",
+            "description": "Server-sent event stream",
+            "headers": {
+              "x-ratelimit-limit": {
+                "description": "Maximum number of requests allowed in the current rate limit window.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-remaining": {
+                "description": "Number of requests remaining in the current rate limit window. Zero means limit reached.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-reset": {
+                "description": "ISO 8601 timestamp when the current rate limit window resets.",
+                "schema": { "type": "string", "format": "date-time" }
+              },
+              "retry-after": {
+                "description": "Number of seconds to wait before retrying. Only present in 429 responses. Per RFC 6585.",
+                "schema": { "type": "integer", "minimum": 1 }
+              }
+            },
             "content": {
-              "application/json": {
+              "text/event-stream": {
                 "schema": {
-                  "type": "object",
-                  "required": ["token", "scope", "subjectId", "expiresAt", "streamPath"],
-                  "properties": {
-                    "token": {
-                      "type": "string",
-                      "description": "Short-lived signed grant presented as a Bearer token or access_token query."
-                    },
-                    "scope": { "type": "string", "enum": ["receipt", "seller"] },
-                    "subjectId": { "type": "string" },
-                    "expiresAt": { "type": "string", "format": "date-time" },
-                    "streamPath": { "type": "string" }
-                  }
+                  "type": "string",
+                  "description": "Server-sent event stream. Emits `stream.ready`, `receipt.status`, optional `stream.reset`, `stream.end`, and `: hb` heartbeat comments. Frames carry an `id` sequence and a signed resume `cursor`; `receipt.status` data contains status metadata only and never includes signed payment payloads, transaction signatures, or receipt evidence material."
                 }
               }
             }
           },
-          "default": {
-            "description": "Error response",
+          "429": {
+            "description": "Rate limit exceeded. The client must wait before retrying. See Retry-After header.",
+            "headers": {
+              "x-ratelimit-limit": {
+                "description": "Maximum number of requests allowed in the current rate limit window.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-remaining": {
+                "description": "Number of requests remaining in the current rate limit window. Zero means limit reached.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-reset": {
+                "description": "ISO 8601 timestamp when the current rate limit window resets.",
+                "schema": { "type": "string", "format": "date-time" }
+              },
+              "retry-after": {
+                "description": "Number of seconds to wait before retrying. Only present in 429 responses. Per RFC 6585.",
+                "schema": { "type": "integer", "minimum": 1 }
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -1738,29 +1892,27 @@
                 }
               }
             }
-          }
-        }
-      }
-    },
-    "/v1/receipts/{receiptId}/stream": {
-      "get": {
-        "operationId": "streamReceiptStatusEvents",
-        "summary": "Stream authorized receipt status updates until the receipt reaches a final state.",
-        "tags": ["facilitator"],
-        "responses": {
-          "200": {
-            "description": "Server-sent event stream",
-            "content": {
-              "text/event-stream": {
-                "schema": {
-                  "type": "string",
-                  "description": "Server-sent event stream. Emits `stream.ready`, `receipt.status`, optional `stream.reset`, `stream.end`, and `: hb` heartbeat comments. Frames carry an `id` sequence and a signed resume `cursor`; `receipt.status` data contains status metadata only and never includes signed payment payloads, transaction signatures, or receipt evidence material."
-                }
-              }
-            }
           },
           "default": {
             "description": "Error response",
+            "headers": {
+              "x-ratelimit-limit": {
+                "description": "Maximum number of requests allowed in the current rate limit window.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-remaining": {
+                "description": "Number of requests remaining in the current rate limit window. Zero means limit reached.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-reset": {
+                "description": "ISO 8601 timestamp when the current rate limit window resets.",
+                "schema": { "type": "string", "format": "date-time" }
+              },
+              "retry-after": {
+                "description": "Number of seconds to wait before retrying. Only present in 429 responses. Per RFC 6585.",
+                "schema": { "type": "integer", "minimum": 1 }
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -2627,6 +2779,24 @@
         "responses": {
           "200": {
             "description": "Successful response",
+            "headers": {
+              "x-ratelimit-limit": {
+                "description": "Maximum number of requests allowed in the current rate limit window.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-remaining": {
+                "description": "Number of requests remaining in the current rate limit window. Zero means limit reached.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-reset": {
+                "description": "ISO 8601 timestamp when the current rate limit window resets.",
+                "schema": { "type": "string", "format": "date-time" }
+              },
+              "retry-after": {
+                "description": "Number of seconds to wait before retrying. Only present in 429 responses. Per RFC 6585.",
+                "schema": { "type": "integer", "minimum": 1 }
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -2646,8 +2816,68 @@
               }
             }
           },
+          "429": {
+            "description": "Rate limit exceeded. The client must wait before retrying. See Retry-After header.",
+            "headers": {
+              "x-ratelimit-limit": {
+                "description": "Maximum number of requests allowed in the current rate limit window.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-remaining": {
+                "description": "Number of requests remaining in the current rate limit window. Zero means limit reached.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-reset": {
+                "description": "ISO 8601 timestamp when the current rate limit window resets.",
+                "schema": { "type": "string", "format": "date-time" }
+              },
+              "retry-after": {
+                "description": "Number of seconds to wait before retrying. Only present in 429 responses. Per RFC 6585.",
+                "schema": { "type": "integer", "minimum": 1 }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "error"],
+                  "properties": {
+                    "ok": { "type": "boolean", "enum": [false] },
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": { "type": "string" },
+                        "message": { "type": "string" },
+                        "details": { "type": "object", "additionalProperties": true }
+                      }
+                    },
+                    "requestId": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
           "default": {
             "description": "Error response",
+            "headers": {
+              "x-ratelimit-limit": {
+                "description": "Maximum number of requests allowed in the current rate limit window.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-remaining": {
+                "description": "Number of requests remaining in the current rate limit window. Zero means limit reached.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-reset": {
+                "description": "ISO 8601 timestamp when the current rate limit window resets.",
+                "schema": { "type": "string", "format": "date-time" }
+              },
+              "retry-after": {
+                "description": "Number of seconds to wait before retrying. Only present in 429 responses. Per RFC 6585.",
+                "schema": { "type": "integer", "minimum": 1 }
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -2681,6 +2911,24 @@
         "responses": {
           "200": {
             "description": "Server-sent event stream",
+            "headers": {
+              "x-ratelimit-limit": {
+                "description": "Maximum number of requests allowed in the current rate limit window.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-remaining": {
+                "description": "Number of requests remaining in the current rate limit window. Zero means limit reached.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-reset": {
+                "description": "ISO 8601 timestamp when the current rate limit window resets.",
+                "schema": { "type": "string", "format": "date-time" }
+              },
+              "retry-after": {
+                "description": "Number of seconds to wait before retrying. Only present in 429 responses. Per RFC 6585.",
+                "schema": { "type": "integer", "minimum": 1 }
+              }
+            },
             "content": {
               "text/event-stream": {
                 "schema": {
@@ -2690,8 +2938,68 @@
               }
             }
           },
+          "429": {
+            "description": "Rate limit exceeded. The client must wait before retrying. See Retry-After header.",
+            "headers": {
+              "x-ratelimit-limit": {
+                "description": "Maximum number of requests allowed in the current rate limit window.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-remaining": {
+                "description": "Number of requests remaining in the current rate limit window. Zero means limit reached.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-reset": {
+                "description": "ISO 8601 timestamp when the current rate limit window resets.",
+                "schema": { "type": "string", "format": "date-time" }
+              },
+              "retry-after": {
+                "description": "Number of seconds to wait before retrying. Only present in 429 responses. Per RFC 6585.",
+                "schema": { "type": "integer", "minimum": 1 }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "error"],
+                  "properties": {
+                    "ok": { "type": "boolean", "enum": [false] },
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": { "type": "string" },
+                        "message": { "type": "string" },
+                        "details": { "type": "object", "additionalProperties": true }
+                      }
+                    },
+                    "requestId": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
           "default": {
             "description": "Error response",
+            "headers": {
+              "x-ratelimit-limit": {
+                "description": "Maximum number of requests allowed in the current rate limit window.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-remaining": {
+                "description": "Number of requests remaining in the current rate limit window. Zero means limit reached.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-reset": {
+                "description": "ISO 8601 timestamp when the current rate limit window resets.",
+                "schema": { "type": "string", "format": "date-time" }
+              },
+              "retry-after": {
+                "description": "Number of seconds to wait before retrying. Only present in 429 responses. Per RFC 6585.",
+                "schema": { "type": "integer", "minimum": 1 }
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -2751,6 +3059,721 @@
             },
             "content": {
               "application/json": { "schema": { "type": "object", "additionalProperties": true } }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded. The client must wait before retrying. See Retry-After header.",
+            "headers": {
+              "x-ratelimit-limit": {
+                "description": "Maximum number of requests allowed in the current rate limit window.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-remaining": {
+                "description": "Number of requests remaining in the current rate limit window. Zero means limit reached.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-reset": {
+                "description": "ISO 8601 timestamp when the current rate limit window resets.",
+                "schema": { "type": "string", "format": "date-time" }
+              },
+              "retry-after": {
+                "description": "Number of seconds to wait before retrying. Only present in 429 responses. Per RFC 6585.",
+                "schema": { "type": "integer", "minimum": 1 }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "error"],
+                  "properties": {
+                    "ok": { "type": "boolean", "enum": [false] },
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": { "type": "string" },
+                        "message": { "type": "string" },
+                        "details": { "type": "object", "additionalProperties": true }
+                      }
+                    },
+                    "requestId": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error response",
+            "headers": {
+              "x-ratelimit-limit": {
+                "description": "Maximum number of requests allowed in the current rate limit window.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-remaining": {
+                "description": "Number of requests remaining in the current rate limit window. Zero means limit reached.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-reset": {
+                "description": "ISO 8601 timestamp when the current rate limit window resets.",
+                "schema": { "type": "string", "format": "date-time" }
+              },
+              "retry-after": {
+                "description": "Number of seconds to wait before retrying. Only present in 429 responses. Per RFC 6585.",
+                "schema": { "type": "integer", "minimum": 1 }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "error"],
+                  "properties": {
+                    "ok": { "type": "boolean", "enum": [false] },
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": { "type": "string" },
+                        "message": { "type": "string" },
+                        "details": { "type": "object", "additionalProperties": true }
+                      }
+                    },
+                    "requestId": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sellers/{sellerId}/api-keys": {
+      "post": {
+        "operationId": "createSellerApiKey",
+        "summary": "Issue a scoped seller API key; the plaintext key is returned exactly once.",
+        "tags": ["sellers"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name", "scopes"],
+                "additionalProperties": false,
+                "properties": {
+                  "name": { "type": "string" },
+                  "scopes": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "type": "string",
+                      "enum": ["resources:read", "resources:write", "seller:read", "seller:write"]
+                    }
+                  },
+                  "expiresInDays": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 365,
+                    "description": "Optional key lifetime in days."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "headers": {
+              "x-ratelimit-limit": {
+                "description": "Maximum number of requests allowed in the current rate limit window.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-remaining": {
+                "description": "Number of requests remaining in the current rate limit window. Zero means limit reached.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-reset": {
+                "description": "ISO 8601 timestamp when the current rate limit window resets.",
+                "schema": { "type": "string", "format": "date-time" }
+              },
+              "retry-after": {
+                "description": "Number of seconds to wait before retrying. Only present in 429 responses. Per RFC 6585.",
+                "schema": { "type": "integer", "minimum": 1 }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["apiKey", "key"],
+                  "properties": {
+                    "apiKey": {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "sellerId",
+                        "name",
+                        "keyPrefix",
+                        "scopes",
+                        "status",
+                        "expiresAt",
+                        "createdAt",
+                        "updatedAt"
+                      ],
+                      "properties": {
+                        "id": { "type": "string" },
+                        "sellerId": { "type": "string" },
+                        "name": { "type": "string" },
+                        "keyPrefix": {
+                          "type": "string",
+                          "description": "Non-secret prefix used to locate the key by hash."
+                        },
+                        "scopes": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "enum": [
+                              "resources:read",
+                              "resources:write",
+                              "seller:read",
+                              "seller:write"
+                            ]
+                          }
+                        },
+                        "status": { "type": "string", "enum": ["active", "revoked"] },
+                        "expiresAt": { "type": ["string", "null"], "format": "date-time" },
+                        "lastUsedAt": { "type": ["string", "null"], "format": "date-time" },
+                        "revokedAt": { "type": ["string", "null"], "format": "date-time" },
+                        "rotatedOutAt": {
+                          "type": ["string", "null"],
+                          "format": "date-time",
+                          "description": "Set on rotation; the key stays valid for a bounded overlap window."
+                        },
+                        "createdAt": { "type": "string", "format": "date-time" },
+                        "updatedAt": { "type": "string", "format": "date-time" }
+                      }
+                    },
+                    "key": {
+                      "type": "string",
+                      "description": "Plaintext seller API key (lbk_...). Shown only in this response; only a SHA-256 hash is stored."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded. The client must wait before retrying. See Retry-After header.",
+            "headers": {
+              "x-ratelimit-limit": {
+                "description": "Maximum number of requests allowed in the current rate limit window.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-remaining": {
+                "description": "Number of requests remaining in the current rate limit window. Zero means limit reached.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-reset": {
+                "description": "ISO 8601 timestamp when the current rate limit window resets.",
+                "schema": { "type": "string", "format": "date-time" }
+              },
+              "retry-after": {
+                "description": "Number of seconds to wait before retrying. Only present in 429 responses. Per RFC 6585.",
+                "schema": { "type": "integer", "minimum": 1 }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "error"],
+                  "properties": {
+                    "ok": { "type": "boolean", "enum": [false] },
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": { "type": "string" },
+                        "message": { "type": "string" },
+                        "details": { "type": "object", "additionalProperties": true }
+                      }
+                    },
+                    "requestId": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error response",
+            "headers": {
+              "x-ratelimit-limit": {
+                "description": "Maximum number of requests allowed in the current rate limit window.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-remaining": {
+                "description": "Number of requests remaining in the current rate limit window. Zero means limit reached.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-reset": {
+                "description": "ISO 8601 timestamp when the current rate limit window resets.",
+                "schema": { "type": "string", "format": "date-time" }
+              },
+              "retry-after": {
+                "description": "Number of seconds to wait before retrying. Only present in 429 responses. Per RFC 6585.",
+                "schema": { "type": "integer", "minimum": 1 }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "error"],
+                  "properties": {
+                    "ok": { "type": "boolean", "enum": [false] },
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": { "type": "string" },
+                        "message": { "type": "string" },
+                        "details": { "type": "object", "additionalProperties": true }
+                      }
+                    },
+                    "requestId": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "listSellerApiKeys",
+        "summary": "List seller API key metadata; plaintext keys and hashes are never returned.",
+        "tags": ["sellers"],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "headers": {
+              "x-ratelimit-limit": {
+                "description": "Maximum number of requests allowed in the current rate limit window.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-remaining": {
+                "description": "Number of requests remaining in the current rate limit window. Zero means limit reached.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-reset": {
+                "description": "ISO 8601 timestamp when the current rate limit window resets.",
+                "schema": { "type": "string", "format": "date-time" }
+              },
+              "retry-after": {
+                "description": "Number of seconds to wait before retrying. Only present in 429 responses. Per RFC 6585.",
+                "schema": { "type": "integer", "minimum": 1 }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["apiKeys"],
+                  "properties": {
+                    "apiKeys": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "sellerId",
+                          "name",
+                          "keyPrefix",
+                          "scopes",
+                          "status",
+                          "expiresAt",
+                          "createdAt",
+                          "updatedAt"
+                        ],
+                        "properties": {
+                          "id": { "type": "string" },
+                          "sellerId": { "type": "string" },
+                          "name": { "type": "string" },
+                          "keyPrefix": {
+                            "type": "string",
+                            "description": "Non-secret prefix used to locate the key by hash."
+                          },
+                          "scopes": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "enum": [
+                                "resources:read",
+                                "resources:write",
+                                "seller:read",
+                                "seller:write"
+                              ]
+                            }
+                          },
+                          "status": { "type": "string", "enum": ["active", "revoked"] },
+                          "expiresAt": { "type": ["string", "null"], "format": "date-time" },
+                          "lastUsedAt": { "type": ["string", "null"], "format": "date-time" },
+                          "revokedAt": { "type": ["string", "null"], "format": "date-time" },
+                          "rotatedOutAt": {
+                            "type": ["string", "null"],
+                            "format": "date-time",
+                            "description": "Set on rotation; the key stays valid for a bounded overlap window."
+                          },
+                          "createdAt": { "type": "string", "format": "date-time" },
+                          "updatedAt": { "type": "string", "format": "date-time" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded. The client must wait before retrying. See Retry-After header.",
+            "headers": {
+              "x-ratelimit-limit": {
+                "description": "Maximum number of requests allowed in the current rate limit window.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-remaining": {
+                "description": "Number of requests remaining in the current rate limit window. Zero means limit reached.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-reset": {
+                "description": "ISO 8601 timestamp when the current rate limit window resets.",
+                "schema": { "type": "string", "format": "date-time" }
+              },
+              "retry-after": {
+                "description": "Number of seconds to wait before retrying. Only present in 429 responses. Per RFC 6585.",
+                "schema": { "type": "integer", "minimum": 1 }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "error"],
+                  "properties": {
+                    "ok": { "type": "boolean", "enum": [false] },
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": { "type": "string" },
+                        "message": { "type": "string" },
+                        "details": { "type": "object", "additionalProperties": true }
+                      }
+                    },
+                    "requestId": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error response",
+            "headers": {
+              "x-ratelimit-limit": {
+                "description": "Maximum number of requests allowed in the current rate limit window.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-remaining": {
+                "description": "Number of requests remaining in the current rate limit window. Zero means limit reached.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-reset": {
+                "description": "ISO 8601 timestamp when the current rate limit window resets.",
+                "schema": { "type": "string", "format": "date-time" }
+              },
+              "retry-after": {
+                "description": "Number of seconds to wait before retrying. Only present in 429 responses. Per RFC 6585.",
+                "schema": { "type": "integer", "minimum": 1 }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "error"],
+                  "properties": {
+                    "ok": { "type": "boolean", "enum": [false] },
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": { "type": "string" },
+                        "message": { "type": "string" },
+                        "details": { "type": "object", "additionalProperties": true }
+                      }
+                    },
+                    "requestId": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sellers/{sellerId}/api-keys/{keyId}/rotate": {
+      "post": {
+        "operationId": "rotateSellerApiKey",
+        "summary": "Rotate a seller API key; the previous key stays valid for a bounded overlap window.",
+        "tags": ["sellers"],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": { "schema": { "type": "object", "additionalProperties": true } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "headers": {
+              "x-ratelimit-limit": {
+                "description": "Maximum number of requests allowed in the current rate limit window.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-remaining": {
+                "description": "Number of requests remaining in the current rate limit window. Zero means limit reached.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-reset": {
+                "description": "ISO 8601 timestamp when the current rate limit window resets.",
+                "schema": { "type": "string", "format": "date-time" }
+              },
+              "retry-after": {
+                "description": "Number of seconds to wait before retrying. Only present in 429 responses. Per RFC 6585.",
+                "schema": { "type": "integer", "minimum": 1 }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["apiKey", "key", "overlapSeconds", "previousKeyId"],
+                  "properties": {
+                    "apiKey": {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "sellerId",
+                        "name",
+                        "keyPrefix",
+                        "scopes",
+                        "status",
+                        "expiresAt",
+                        "createdAt",
+                        "updatedAt"
+                      ],
+                      "properties": {
+                        "id": { "type": "string" },
+                        "sellerId": { "type": "string" },
+                        "name": { "type": "string" },
+                        "keyPrefix": {
+                          "type": "string",
+                          "description": "Non-secret prefix used to locate the key by hash."
+                        },
+                        "scopes": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "enum": [
+                              "resources:read",
+                              "resources:write",
+                              "seller:read",
+                              "seller:write"
+                            ]
+                          }
+                        },
+                        "status": { "type": "string", "enum": ["active", "revoked"] },
+                        "expiresAt": { "type": ["string", "null"], "format": "date-time" },
+                        "lastUsedAt": { "type": ["string", "null"], "format": "date-time" },
+                        "revokedAt": { "type": ["string", "null"], "format": "date-time" },
+                        "rotatedOutAt": {
+                          "type": ["string", "null"],
+                          "format": "date-time",
+                          "description": "Set on rotation; the key stays valid for a bounded overlap window."
+                        },
+                        "createdAt": { "type": "string", "format": "date-time" },
+                        "updatedAt": { "type": "string", "format": "date-time" }
+                      }
+                    },
+                    "key": {
+                      "type": "string",
+                      "description": "Plaintext seller API key (lbk_...). Shown only in this response; only a SHA-256 hash is stored."
+                    },
+                    "overlapSeconds": { "type": "integer" },
+                    "previousKeyId": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded. The client must wait before retrying. See Retry-After header.",
+            "headers": {
+              "x-ratelimit-limit": {
+                "description": "Maximum number of requests allowed in the current rate limit window.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-remaining": {
+                "description": "Number of requests remaining in the current rate limit window. Zero means limit reached.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-reset": {
+                "description": "ISO 8601 timestamp when the current rate limit window resets.",
+                "schema": { "type": "string", "format": "date-time" }
+              },
+              "retry-after": {
+                "description": "Number of seconds to wait before retrying. Only present in 429 responses. Per RFC 6585.",
+                "schema": { "type": "integer", "minimum": 1 }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "error"],
+                  "properties": {
+                    "ok": { "type": "boolean", "enum": [false] },
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": { "type": "string" },
+                        "message": { "type": "string" },
+                        "details": { "type": "object", "additionalProperties": true }
+                      }
+                    },
+                    "requestId": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error response",
+            "headers": {
+              "x-ratelimit-limit": {
+                "description": "Maximum number of requests allowed in the current rate limit window.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-remaining": {
+                "description": "Number of requests remaining in the current rate limit window. Zero means limit reached.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-reset": {
+                "description": "ISO 8601 timestamp when the current rate limit window resets.",
+                "schema": { "type": "string", "format": "date-time" }
+              },
+              "retry-after": {
+                "description": "Number of seconds to wait before retrying. Only present in 429 responses. Per RFC 6585.",
+                "schema": { "type": "integer", "minimum": 1 }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "error"],
+                  "properties": {
+                    "ok": { "type": "boolean", "enum": [false] },
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": { "type": "string" },
+                        "message": { "type": "string" },
+                        "details": { "type": "object", "additionalProperties": true }
+                      }
+                    },
+                    "requestId": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sellers/{sellerId}/api-keys/{keyId}": {
+      "delete": {
+        "operationId": "revokeSellerApiKey",
+        "summary": "Immediately revoke a seller API key; revocation is terminal.",
+        "tags": ["sellers"],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "headers": {
+              "x-ratelimit-limit": {
+                "description": "Maximum number of requests allowed in the current rate limit window.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-remaining": {
+                "description": "Number of requests remaining in the current rate limit window. Zero means limit reached.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-reset": {
+                "description": "ISO 8601 timestamp when the current rate limit window resets.",
+                "schema": { "type": "string", "format": "date-time" }
+              },
+              "retry-after": {
+                "description": "Number of seconds to wait before retrying. Only present in 429 responses. Per RFC 6585.",
+                "schema": { "type": "integer", "minimum": 1 }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "sellerId",
+                    "name",
+                    "keyPrefix",
+                    "scopes",
+                    "status",
+                    "expiresAt",
+                    "createdAt",
+                    "updatedAt"
+                  ],
+                  "properties": {
+                    "id": { "type": "string" },
+                    "sellerId": { "type": "string" },
+                    "name": { "type": "string" },
+                    "keyPrefix": {
+                      "type": "string",
+                      "description": "Non-secret prefix used to locate the key by hash."
+                    },
+                    "scopes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": ["resources:read", "resources:write", "seller:read", "seller:write"]
+                      }
+                    },
+                    "status": { "type": "string", "enum": ["active", "revoked"] },
+                    "expiresAt": { "type": ["string", "null"], "format": "date-time" },
+                    "lastUsedAt": { "type": ["string", "null"], "format": "date-time" },
+                    "revokedAt": { "type": ["string", "null"], "format": "date-time" },
+                    "rotatedOutAt": {
+                      "type": ["string", "null"],
+                      "format": "date-time",
+                      "description": "Set on rotation; the key stays valid for a bounded overlap window."
+                    },
+                    "createdAt": { "type": "string", "format": "date-time" },
+                    "updatedAt": { "type": "string", "format": "date-time" }
+                  }
+                }
+              }
             }
           },
           "429": {

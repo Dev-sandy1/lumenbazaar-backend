@@ -85,6 +85,13 @@ export function classifyRateLimitScope(request: Pick<FastifyRequest, "method" | 
 }
 
 function rateLimitKey(request: FastifyRequest) {
+  const principal = request.sellerApiKeyPrincipal;
+
+  if (principal !== undefined) {
+    // Authenticated keys use their stable key ID as the rate-limit identity.
+    return `key:${principal.keyId}`;
+  }
+
   const apiKey = request.headers["x-api-key"];
 
   if (typeof apiKey === "string" && apiKey.trim().length > 0) {
