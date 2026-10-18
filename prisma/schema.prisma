@@ -25,8 +25,29 @@ model Seller {
   searchDocuments  SearchDocument[]
   webhookEndpoints WebhookEndpoint[]
   webhookEvents    WebhookEvent[]
+  apiKeys          SellerApiKey[]
 
   @@index([domain])
+}
+
+model SellerApiKey {
+  id           String    @id @default(cuid())
+  sellerId     String
+  name         String
+  keyPrefix    String    @db.VarChar(32)
+  keyHash      String    @unique
+  scopes       Json
+  status       String    @default("active")
+  expiresAt    DateTime?
+  lastUsedAt   DateTime?
+  revokedAt    DateTime?
+  rotatedOutAt DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  seller       Seller    @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+
+  @@index([sellerId, status])
+  @@index([keyPrefix])
 }
 
 model SellerDomain {

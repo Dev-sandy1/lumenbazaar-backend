@@ -500,6 +500,68 @@ const receiptEventStream: SchemaObject = {
     "signed payment payloads, transaction signatures, or receipt evidence material."
 };
 
+const sellerApiKeyScope: SchemaObject = {
+  type: "string",
+  enum: ["resources:read", "resources:write", "seller:read", "seller:write"]
+};
+
+const sellerApiKey: SchemaObject = {
+  type: "object",
+  required: [
+    "id",
+    "sellerId",
+    "name",
+    "keyPrefix",
+    "scopes",
+    "status",
+    "expiresAt",
+    "createdAt",
+    "updatedAt"
+  ],
+  properties: {
+    id: { type: "string" },
+    sellerId: { type: "string" },
+    name: { type: "string" },
+    keyPrefix: {
+      type: "string",
+      description: "Non-secret prefix used to locate the key by hash."
+    },
+    scopes: { type: "array", items: sellerApiKeyScope },
+    status: { type: "string", enum: ["active", "revoked"] },
+    expiresAt: { type: ["string", "null"], format: "date-time" },
+    lastUsedAt: { type: ["string", "null"], format: "date-time" },
+    revokedAt: { type: ["string", "null"], format: "date-time" },
+    rotatedOutAt: {
+      type: ["string", "null"],
+      format: "date-time",
+      description: "Set on rotation; the key stays valid for a bounded overlap window."
+    },
+    createdAt: { type: "string", format: "date-time" },
+    updatedAt: { type: "string", format: "date-time" }
+  }
+};
+
+const sellerApiKeyIssuance: SchemaObject = {
+  type: "object",
+  required: ["apiKey", "key"],
+  properties: {
+    apiKey: sellerApiKey,
+    key: {
+      type: "string",
+      description:
+        "Plaintext seller API key (lbk_...). Shown only in this response; only a SHA-256 hash is stored."
+    }
+  }
+};
+
+const sellerApiKeyList: SchemaObject = {
+  type: "object",
+  required: ["apiKeys"],
+  properties: {
+    apiKeys: { type: "array", items: sellerApiKey }
+  }
+};
+
 export const apiRouteContracts: RouteContract[] = [
   {
     method: "get",
@@ -692,6 +754,64 @@ export const apiRouteContracts: RouteContract[] = [
     tags: ["sellers"],
     requestBody: jsonObject,
     response: jsonObject
+  },
+  {
+    method: "post",
+    path: "/v1/sellers/{sellerId}/api-keys",
+    operationId: "createSellerApiKey",
+    summary: "Issue a scoped seller API key; the plaintext key is returned exactly once.",
+    tags: ["sellers"],
+    requestBody: {
+      type: "object",
+      required: ["name", "scopes"],
+      additionalProperties: false,
+      properties: {
+        name: { type: "string" },
+        scopes: { type: "array", minItems: 1, items: sellerApiKeyScope },
+        expiresInDays: {
+          type: "integer",
+          minimum: 1,
+          maximum: 365,
+          description: "Optional key lifetime in days."
+        }
+      }
+    },
+    response: sellerApiKeyIssuance
+  },
+  {
+    method: "get",
+    path: "/v1/sellers/{sellerId}/api-keys",
+    operationId: "listSellerApiKeys",
+    summary: "List seller API key metadata; plaintext keys and hashes are never returned.",
+    tags: ["sellers"],
+    response: sellerApiKeyList
+  },
+  {
+    method: "post",
+    path: "/v1/sellers/{sellerId}/api-keys/{keyId}/rotate",
+    operationId: "rotateSellerApiKey",
+    summary:
+      "Rotate a seller API key; the previous key stays valid for a bounded overlap window.",
+    tags: ["sellers"],
+    requestBody: jsonObject,
+    requestBodyRequired: false,
+    response: {
+      type: "object",
+      required: ["apiKey", "key", "overlapSeconds", "previousKeyId"],
+      properties: {
+        ...(sellerApiKeyIssuance.properties as Record<string, unknown>),
+        overlapSeconds: { type: "integer" },
+        previousKeyId: { type: "string" }
+      }
+    }
+  },
+  {
+    method: "delete",
+    path: "/v1/sellers/{sellerId}/api-keys/{keyId}",
+    operationId: "revokeSellerApiKey",
+    summary: "Immediately revoke a seller API key; revocation is terminal.",
+    tags: ["sellers"],
+    response: sellerApiKey
   },
   {
     method: "get",
@@ -944,7 +1064,7 @@ export function buildOpenApiSpec() {
           "retry-after: Seconds to wait before retrying (429 responses only, RFC 6585)"
         ],
         identification:
-          "Rate limits are identified by x-api-key header if present, otherwise by request IP address (x-forwarded-for not trusted)",
+          "Authenticated seller API keys are identified by their key ID; other requests use the x-api-key header value if present, otherwise by request IP address (x-forwarded-for not trusted)",
         behavior:
           "During Redis unavailability, rate limiting degrades to in-memory per-instance limits, prioritizing availability over perfect enforcement"
       }

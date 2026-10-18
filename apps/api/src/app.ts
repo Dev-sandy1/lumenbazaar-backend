@@ -22,6 +22,7 @@ import {
 
 import { registerErrorHandling } from "./http/errors.js";
 import { registerRateLimitHook } from "./http/rateLimit.js";
+import { registerSellerApiKeyAuth } from "./http/sellerApiKeyAuth.js";
 import { registerConformanceRoutes } from "./routes/conformance.js";
 import { registerDiscoveryRoutes } from "./routes/discovery.js";
 import { registerFacilitatorRoutes } from "./routes/facilitator.js";
@@ -59,6 +60,7 @@ import {
 } from "./services/capabilityRegistry.js";
 import { ResourceService } from "./services/resources.js";
 import { SearchService } from "./services/search.js";
+import { SellerApiKeyService } from "./services/sellerApiKeys.js";
 import { SellerService } from "./services/sellers.js";
 import { WebhookService } from "./services/webhooks.js";
 import { WebhookEventService } from "./services/webhookEvents.js";
@@ -71,6 +73,7 @@ export type BuildApiAppOptions = {
   settlementService?: SettlementService;
   receiptService?: ReceiptService;
   sellerService?: SellerService;
+  sellerApiKeyService?: SellerApiKeyService;
   webhookService?: WebhookService;
   webhookEventService?: WebhookEventService;
   resourceService?: ResourceService;
@@ -167,13 +170,33 @@ export function buildApiApp(options: BuildApiAppOptions = {}) {
   if (runtimeRateLimit !== undefined) {
     app.addHook("onClose", async () => runtimeRateLimit.close());
   }
+  const sellerService =
+    options.sellerService ?? new SellerService(catalogPersistence.sellerStore, auditLogService);
+  const resourceService =
+    options.resourceService ??
+    new ResourceService(
+      config,
+      sellerService,
+      catalogPersistence.resourceStore,
+      catalogPersistence.indexingQueue
+    );
+  const sellerApiKeyService =
+    options.sellerApiKeyService ??
+    new SellerApiKeyService(catalogPersistence.sellerApiKeyStore, auditLogService);
+  registerSellerApiKeyAuth(app, {
+    sellerApiKeyService,
+    resolveResourceSeller: async (resourceId) => {
+      const resource = await resourceService.getResource(resourceId).catch(() => undefined);
+      return resource?.sellerId;
+    }
+  });
+  registerRateLimitHook(app, { rateLimitService });
   const metricsService = options.metricsService ?? createMetricsService();
   const operationalMetrics = createOperationalMetricsRefresher(config, metricsService);
   app.addHook("onClose", async () => operationalMetrics.close());
   const receiptService =
     options.receiptService ?? new ReceiptService({ receiptStore: paymentPersistence.receiptStore });
 
-  registerRateLimitHook(app, { rateLimitService });
   registerMetadataRoutes(app, {
     config,
     metrics: metricsService,
@@ -206,16 +229,6 @@ export function buildApiApp(options: BuildApiAppOptions = {}) {
   const routeReceiptService = options.receiptService ?? settlementService.getReceiptService();
   const paymentSessionService =
     options.paymentSessionService ?? new PaymentSessionService(config, { auditLogService });
-  const sellerService =
-    options.sellerService ?? new SellerService(catalogPersistence.sellerStore, auditLogService);
-  const resourceService =
-    options.resourceService ??
-    new ResourceService(
-      config,
-      sellerService,
-      catalogPersistence.resourceStore,
-      catalogPersistence.indexingQueue
-    );
   const catalogValidationService =
     options.catalogValidationService ?? new CatalogValidationService(config, sellerService);
   const catalogService =
@@ -317,7 +330,7 @@ export function buildApiApp(options: BuildApiAppOptions = {}) {
     capabilityRegistry: () => getCapabilityRegistry()
   });
   registerPaymentSessionRoutes(app, { paymentSessionService });
-  registerSellerRoutes(app, { sellerService });
+  registerSellerRoutes(app, { sellerService, sellerApiKeyService });
   registerWebhookRoutes(app, { webhookService: options.webhookService });
   registerResourceRoutes(app, { resourceService });
   registerDiscoveryRoutes(app, {

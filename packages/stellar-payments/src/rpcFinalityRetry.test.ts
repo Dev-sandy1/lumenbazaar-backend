@@ -262,6 +262,8 @@ describe("RPC Finality Retry Logic", () => {
     });
   });
 });
+
+/**
  * Testable version of resolveRpcFinality from x402Adapter.ts
  * Extracted for unit testing purposes.
  */

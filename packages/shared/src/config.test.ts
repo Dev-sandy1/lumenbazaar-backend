@@ -259,3 +259,4 @@ describe("loadConfig", () => {
     expect(pubnetAsset.kind).toBe("usdc");
     expect(pubnetAsset.isTestOnly).toBe(false);
   });
+});
