@@ -73,7 +73,7 @@ export class CatalogService {
     this.metrics = options.metrics;
   }
 
-  async catalog(input: unknown) {
+  async catalog(input: unknown, sellerContext?: { sellerId: string; auditable: boolean }) {
     const validation = await this.validationService.validate(input);
 
     if (!validation.ok) {
@@ -86,7 +86,28 @@ export class CatalogService {
     }
 
     const metadata = parseDiscoveryMetadata(input);
-    const resource = await this.resourceService.createResource(toResourceCreateInput(metadata));
+    
+    // Enforce seller ownership when seller context is provided (authenticated request)
+    if (sellerContext?.auditable && metadata.sellerId !== sellerContext.sellerId) {
+      await this.auditLogService?.record({
+        action: "resource.ownership_denied",
+        actorType: "seller",
+        actorId: sellerContext.sellerId,
+        targetType: "catalog",
+        targetId: undefined,
+        metadata: {
+          reason: "Attempted to catalog resource for different seller",
+          attemptedSellerId: metadata.sellerId,
+          actualSellerId: sellerContext.sellerId
+        }
+      });
+      throw new LumenError(
+        "FORBIDDEN",
+        "API key cannot catalog resources for another seller."
+      );
+    }
+    
+    const resource = await this.resourceService.createResource(toResourceCreateInput(metadata), sellerContext);
     const version = await this.resourceService.getStore().getLatestVersion(resource.id);
 
     if (version === undefined) {

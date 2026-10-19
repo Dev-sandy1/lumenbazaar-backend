@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { loadConfig, localIssuerPublicKey } from "@lumenbazaar/shared";
 
+import { AuditLogService, InMemoryAuditLogStore } from "./audit.js";
 import { InMemoryResourceStore, ResourceService } from "./resources.js";
 import { SellerService } from "./sellers.js";
 
@@ -293,6 +294,316 @@ describe("ResourceService", () => {
       expect(
         jobs.some((job) => job.resourceId === resource.id)
       ).toBe(true);
+    });
+  });
+
+  describe("seller ownership enforcement", () => {
+    function setup() {
+      const sellerService = new SellerService();
+      const store = new InMemoryResourceStore();
+      const auditLogStore = new InMemoryAuditLogStore();
+      const auditLogService = new AuditLogService(auditLogStore);
+      const service = new ResourceService(
+        loadConfig({ STELLAR_TESTNET_USDC_ISSUER: localIssuerPublicKey }),
+        sellerService,
+        store,
+        undefined,
+        auditLogService
+      );
+      return { sellerService, store, service, auditLogStore, auditLogService };
+    }
+
+    it("allows resource creation when seller context matches", async () => {
+      const { service, sellerService } = setup();
+      const seller = await sellerService.createSeller({
+        displayName: "Weather Seller",
+        walletAddress: localIssuerPublicKey,
+        domain: "seller.example"
+      });
+
+      const resource = await service.createResource(resourceInput(seller.id), {
+        sellerId: seller.id,
+        auditable: true
+      });
+
+      expect(resource.sellerId).toBe(seller.id);
+    });
+
+    it("denies resource creation when seller context mismatches", async () => {
+      const { service, sellerService, auditLogStore } = setup();
+      const seller1 = await sellerService.createSeller({
+        displayName: "Seller 1",
+        walletAddress: localIssuerPublicKey,
+        domain: "seller1.example"
+      });
+      const seller2 = await sellerService.createSeller({
+        displayName: "Seller 2",
+        walletAddress: `G${localIssuerPublicKey.slice(1)}`,
+        domain: "seller2.example"
+      });
+
+      // Seller 2's API key tries to create a resource for Seller 1
+      await expect(
+        service.createResource(resourceInput(seller1.id), {
+          sellerId: seller2.id,
+          auditable: true
+        })
+      ).rejects.toMatchObject({
+        code: "FORBIDDEN",
+        message: expect.stringMatching(/cannot create resources for another seller/i)
+      });
+
+      // Verify ownership denial was audited
+      const logs = await auditLogStore.list();
+      const ownershipDenial = logs.find(
+        (log) =>
+          log.action === "resource.ownership_denied" &&
+          log.actorId === seller2.id &&
+          log.targetType === "resource"
+      );
+      expect(ownershipDenial).toBeDefined();
+      expect(ownershipDenial!.metadata).toMatchObject({
+        reason: "Attempted to create resource for different seller",
+        attemptedSellerId: seller1.id,
+        actualSellerId: seller2.id
+      });
+    });
+
+    it("allows resource update when seller context matches", async () => {
+      const { service, sellerService } = setup();
+      const seller = await sellerService.createSeller({
+        displayName: "Weather Seller",
+        walletAddress: localIssuerPublicKey,
+        domain: "seller.example"
+      });
+      const resource = await service.createResource(resourceInput(seller.id));
+
+      const updated = await service.updateResource(
+        resource.id,
+        { name: "Updated Name" },
+        {
+          sellerId: seller.id,
+          auditable: true
+        }
+      );
+
+      expect(updated.name).toBe("Updated Name");
+    });
+
+    it("denies resource update when seller context mismatches", async () => {
+      const { service, sellerService, auditLogStore } = setup();
+      const seller1 = await sellerService.createSeller({
+        displayName: "Seller 1",
+        walletAddress: localIssuerPublicKey,
+        domain: "seller1.example"
+      });
+      const seller2 = await sellerService.createSeller({
+        displayName: "Seller 2",
+        walletAddress: `G${localIssuerPublicKey.slice(1)}`,
+        domain: "seller2.example"
+      });
+      const resource = await service.createResource(resourceInput(seller1.id));
+
+      // Seller 2's API key tries to update Seller 1's resource
+      await expect(
+        service.updateResource(
+          resource.id,
+          { name: "Hacked Name" },
+          {
+            sellerId: seller2.id,
+            auditable: true
+          }
+        )
+      ).rejects.toMatchObject({
+        code: "FORBIDDEN",
+        message: expect.stringMatching(/does not own this resource/i)
+      });
+
+      // Verify ownership denial was audited
+      const logs = await auditLogStore.list();
+      const ownershipDenial = logs.find(
+        (log) =>
+          log.action === "resource.ownership_denied" &&
+          log.actorId === seller2.id &&
+          log.targetId === resource.id
+      );
+      expect(ownershipDenial).toBeDefined();
+      expect(ownershipDenial!.metadata).toMatchObject({
+        reason: expect.stringMatching(/attempted to update resource owned by different seller/i),
+        attemptedOperation: "update",
+        actualOwnerId: seller1.id
+      });
+    });
+
+    it("allows resource deletion when seller context matches", async () => {
+      const { service, sellerService } = setup();
+      const seller = await sellerService.createSeller({
+        displayName: "Weather Seller",
+        walletAddress: localIssuerPublicKey,
+        domain: "seller.example"
+      });
+      const resource = await service.createResource(resourceInput(seller.id));
+
+      const deleted = await service.deleteResource(resource.id, {
+        sellerId: seller.id,
+        auditable: true
+      });
+
+      expect(deleted.status).toBe("inactive");
+    });
+
+    it("denies resource deletion when seller context mismatches", async () => {
+      const { service, sellerService, auditLogStore } = setup();
+      const seller1 = await sellerService.createSeller({
+        displayName: "Seller 1",
+        walletAddress: localIssuerPublicKey,
+        domain: "seller1.example"
+      });
+      const seller2 = await sellerService.createSeller({
+        displayName: "Seller 2",
+        walletAddress: `G${localIssuerPublicKey.slice(1)}`,
+        domain: "seller2.example"
+      });
+      const resource = await service.createResource(resourceInput(seller1.id));
+
+      // Seller 2's API key tries to delete Seller 1's resource
+      await expect(
+        service.deleteResource(resource.id, {
+          sellerId: seller2.id,
+          auditable: true
+        })
+      ).rejects.toMatchObject({
+        code: "FORBIDDEN",
+        message: expect.stringMatching(/does not own this resource/i)
+      });
+
+      // Verify ownership denial was audited
+      const logs = await auditLogStore.list();
+      const ownershipDenial = logs.find(
+        (log) =>
+          log.action === "resource.ownership_denied" &&
+          log.actorId === seller2.id &&
+          log.targetId === resource.id
+      );
+      expect(ownershipDenial).toBeDefined();
+    });
+
+    it("allows resource rollback when seller context matches", async () => {
+      const { service, sellerService } = setup();
+      const seller = await sellerService.createSeller({
+        displayName: "Weather Seller",
+        walletAddress: localIssuerPublicKey,
+        domain: "seller.example"
+      });
+      const resource = await service.createResource(resourceInput(seller.id));
+      await service.updateResource(resource.id, { name: "v2" });
+
+      const rolledBack = await service.rollbackResource(resource.id, 1, {
+        sellerId: seller.id,
+        auditable: true
+      });
+
+      expect(rolledBack.resource.name).toBe("Paid Weather API");
+    });
+
+    it("denies resource rollback when seller context mismatches", async () => {
+      const { service, sellerService, auditLogStore } = setup();
+      const seller1 = await sellerService.createSeller({
+        displayName: "Seller 1",
+        walletAddress: localIssuerPublicKey,
+        domain: "seller1.example"
+      });
+      const seller2 = await sellerService.createSeller({
+        displayName: "Seller 2",
+        walletAddress: `G${localIssuerPublicKey.slice(1)}`,
+        domain: "seller2.example"
+      });
+      const resource = await service.createResource(resourceInput(seller1.id));
+      await service.updateResource(resource.id, { name: "v2" });
+
+      // Seller 2's API key tries to rollback Seller 1's resource
+      await expect(
+        service.rollbackResource(resource.id, 1, {
+          sellerId: seller2.id,
+          auditable: true
+        })
+      ).rejects.toMatchObject({
+        code: "FORBIDDEN",
+        message: expect.stringMatching(/does not own this resource/i)
+      });
+
+      // Verify ownership denial was audited
+      const logs = await auditLogStore.list();
+      const ownershipDenial = logs.find(
+        (log) =>
+          log.action === "resource.ownership_denied" &&
+          log.actorId === seller2.id &&
+          log.targetId === resource.id &&
+          log.metadata.attemptedOperation === "rollback"
+      );
+      expect(ownershipDenial).toBeDefined();
+      expect(ownershipDenial!.metadata).toMatchObject({
+        reason: expect.stringMatching(/attempted to rollback resource owned by different seller/i),
+        targetVersion: 1,
+        actualOwnerId: seller1.id
+      });
+    });
+
+    it("allows unauthenticated mutations (seller context undefined)", async () => {
+      const { service, sellerService } = setup();
+      const seller = await sellerService.createSeller({
+        displayName: "Weather Seller",
+        walletAddress: localIssuerPublicKey,
+        domain: "seller.example"
+      });
+
+      // Unauthenticated create (no seller context)
+      const resource = await service.createResource(resourceInput(seller.id), undefined);
+      expect(resource.sellerId).toBe(seller.id);
+
+      // Unauthenticated update
+      const updated = await service.updateResource(
+        resource.id,
+        { name: "Updated" },
+        undefined
+      );
+      expect(updated.name).toBe("Updated");
+    });
+
+    it("records authorization failures before side effects", async () => {
+      const { service, sellerService, store, auditLogStore } = setup();
+      const seller1 = await sellerService.createSeller({
+        displayName: "Seller 1",
+        walletAddress: localIssuerPublicKey,
+        domain: "seller1.example"
+      });
+      const seller2 = await sellerService.createSeller({
+        displayName: "Seller 2",
+        walletAddress: `G${localIssuerPublicKey.slice(1)}`,
+        domain: "seller2.example"
+      });
+      const resource = await service.createResource(resourceInput(seller1.id));
+      const resourceCountBefore = (await store.listResources({})).resources.length;
+
+      // Attempt cross-seller update (should fail)
+      await expect(
+        service.updateResource(
+          resource.id,
+          { name: "Malicious Update" },
+          {
+            sellerId: seller2.id,
+            auditable: true
+          }
+        )
+      ).rejects.toThrow();
+
+      // Verify no actual update occurred (side effect prevented)
+      const resourceAfter = await store.getResource(resource.id);
+      expect(resourceAfter!.name).toBe("Paid Weather API");
+
+      // Verify audit log was created (before attempting update)
+      const logs = await auditLogStore.list();
+      expect(logs.some((log) => log.action === "resource.ownership_denied")).toBe(true);
     });
   });
 });

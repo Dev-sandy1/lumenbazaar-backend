@@ -83,4 +83,102 @@ describe("CatalogService", () => {
       code: "CATALOG_VALIDATION_FAILED"
     });
   });
+
+  describe("seller ownership enforcement", () => {
+    it("allows catalog when seller context matches", async () => {
+      const sellerService = new SellerService();
+      const seller = await sellerService.createSeller({
+        displayName: "Weather Seller",
+        walletAddress: localIssuerPublicKey,
+        domain: "seller.example"
+      });
+
+      const config = loadConfig({});
+      const resourceService = new ResourceService(config, sellerService);
+      const validationService = new CatalogValidationService(config, sellerService);
+      const catalogService = new CatalogService(validationService, resourceService);
+
+      const result = await catalogService.catalog(metadata(seller.id), {
+        sellerId: seller.id,
+        auditable: true
+      });
+
+      expect(result).toMatchObject({
+        ok: true,
+        indexingStatus: "queued"
+      });
+    });
+
+    it("denies catalog when seller context mismatches", async () => {
+      const { AuditLogService, InMemoryAuditLogStore } = await import("./audit.js");
+      const sellerService = new SellerService();
+      const seller1 = await sellerService.createSeller({
+        displayName: "Seller 1",
+        walletAddress: localIssuerPublicKey,
+        domain: "seller1.example"
+      });
+      const seller2 = await sellerService.createSeller({
+        displayName: "Seller 2",
+        walletAddress: `G${localIssuerPublicKey.slice(1)}`,
+        domain: "seller2.example"
+      });
+
+      const config = loadConfig({});
+      const resourceService = new ResourceService(config, sellerService);
+      const validationService = new CatalogValidationService(config, sellerService);
+      const auditLogStore = new InMemoryAuditLogStore();
+      const auditLogService = new AuditLogService(auditLogStore);
+      const catalogService = new CatalogService(validationService, resourceService, {
+        auditLogService
+      });
+
+      // Seller 2's API key tries to catalog for Seller 1
+      await expect(
+        catalogService.catalog(metadata(seller1.id), {
+          sellerId: seller2.id,
+          auditable: true
+        })
+      ).rejects.toMatchObject({
+        code: "FORBIDDEN",
+        message: expect.stringMatching(/cannot catalog resources for another seller/i)
+      });
+
+      // Verify ownership denial was audited
+      const logs = await auditLogStore.list();
+      const ownershipDenial = logs.find(
+        (log) =>
+          log.action === "resource.ownership_denied" &&
+          log.actorId === seller2.id &&
+          log.targetType === "catalog"
+      );
+      expect(ownershipDenial).toBeDefined();
+      expect(ownershipDenial!.metadata).toMatchObject({
+        reason: "Attempted to catalog resource for different seller",
+        attemptedSellerId: seller1.id,
+        actualSellerId: seller2.id
+      });
+    });
+
+    it("allows unauthenticated catalog (seller context undefined)", async () => {
+      const sellerService = new SellerService();
+      const seller = await sellerService.createSeller({
+        displayName: "Weather Seller",
+        walletAddress: localIssuerPublicKey,
+        domain: "seller.example"
+      });
+
+      const config = loadConfig({});
+      const resourceService = new ResourceService(config, sellerService);
+      const validationService = new CatalogValidationService(config, sellerService);
+      const catalogService = new CatalogService(validationService, resourceService);
+
+      // Unauthenticated catalog (no seller context)
+      const result = await catalogService.catalog(metadata(seller.id), undefined);
+
+      expect(result).toMatchObject({
+        ok: true,
+        indexingStatus: "queued"
+      });
+    });
+  });
 });

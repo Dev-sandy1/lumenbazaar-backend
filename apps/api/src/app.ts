@@ -178,7 +178,8 @@ export function buildApiApp(options: BuildApiAppOptions = {}) {
       config,
       sellerService,
       catalogPersistence.resourceStore,
-      catalogPersistence.indexingQueue
+      catalogPersistence.indexingQueue,
+      auditLogService
     );
   const sellerApiKeyService =
     options.sellerApiKeyService ??

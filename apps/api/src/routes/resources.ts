@@ -1,5 +1,7 @@
-import { type FastifyInstance } from "fastify";
+import { type FastifyInstance, type FastifyRequest } from "fastify";
 import { z } from "zod";
+
+import { type SellerApiKeyPrincipal } from "@lumenbazaar/shared";
 
 import { parseBody, parseParams, parseQuery } from "../http/validation.js";
 import { type ResourceService } from "../services/resources.js";
@@ -12,7 +14,10 @@ export function registerResourceRoutes(app: FastifyInstance, options: ResourceRo
   app.get("/v1/resources", async (request) => options.resourceService.listResources(request.query));
 
   app.post("/v1/resources", async (request) =>
-    options.resourceService.createResource(parseBody(request, z.unknown()))
+    options.resourceService.createResource(
+      parseBody(request, z.unknown()),
+      getSellerContext(request)
+    )
   );
 
   app.get("/v1/resources/:id", async (request) => {
@@ -22,12 +27,16 @@ export function registerResourceRoutes(app: FastifyInstance, options: ResourceRo
 
   app.patch("/v1/resources/:id", async (request) => {
     const params = parseParams(request, z.object({ id: z.string().min(1) }));
-    return options.resourceService.updateResource(params.id, parseBody(request, z.unknown()));
+    return options.resourceService.updateResource(
+      params.id,
+      parseBody(request, z.unknown()),
+      getSellerContext(request)
+    );
   });
 
   app.delete("/v1/resources/:id", async (request) => {
     const params = parseParams(request, z.object({ id: z.string().min(1) }));
-    return options.resourceService.deleteResource(params.id);
+    return options.resourceService.deleteResource(params.id, getSellerContext(request));
   });
 
   app.get("/v1/resources/:id/versions", async (request) => {
@@ -48,7 +57,7 @@ export function registerResourceRoutes(app: FastifyInstance, options: ResourceRo
       request,
       z.object({ id: z.string().min(1), version: z.coerce.number().int().positive() })
     );
-    return options.resourceService.rollbackResource(params.id, params.version);
+    return options.resourceService.rollbackResource(params.id, params.version, getSellerContext(request));
   });
 
   app.get("/v1/sellers/:sellerId/resources", async (request) => {
@@ -56,4 +65,15 @@ export function registerResourceRoutes(app: FastifyInstance, options: ResourceRo
     const query = parseQuery(request, z.record(z.string(), z.unknown()));
     return options.resourceService.listResources({ ...query, sellerId: params.sellerId });
   });
+}
+
+function getSellerContext(request: FastifyRequest): { sellerId: string; auditable: boolean } | undefined {
+  const principal = (request as any).sellerApiKeyPrincipal as SellerApiKeyPrincipal | undefined;
+  if (principal === undefined) {
+    return undefined;
+  }
+  return {
+    sellerId: principal.sellerId,
+    auditable: true
+  };
 }
