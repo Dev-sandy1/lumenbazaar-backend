@@ -934,6 +934,15 @@ export const apiRouteContracts: RouteContract[] = [
   },
   {
     method: "post",
+    path: "/v1/sellers/{sellerId}/catalog",
+    operationId: "catalogResourceForSeller",
+    summary: "Catalog a resource for a seller using an authenticated API key.",
+    tags: ["discovery", "sellers"],
+    requestBody: jsonObject,
+    response: jsonObject
+  },
+  {
+    method: "post",
     path: "/v1/conformance/runs",
     operationId: "createConformanceRun",
     summary: "Run backend x402 conformance checks and persist the result.",

@@ -64,6 +64,35 @@ export function registerSellerApiKeyAuth(app: FastifyInstance, options: SellerAp
       return;
     }
 
+    if (route === "/v1/resources/:id/versions" && (method === "GET")) {
+      // Version listing requires read scope and resource ownership
+      requireScope(principal, "resources:read");
+      await requireResourceOwnership(request, principal, options);
+      return;
+    }
+
+    if (route === "/v1/resources/:id/versions/:version" && (method === "GET")) {
+      // Version retrieval requires read scope and resource ownership
+      requireScope(principal, "resources:read");
+      await requireResourceOwnership(request, principal, options);
+      return;
+    }
+
+    if (route === "/v1/resources/:id/rollback" && method === "POST") {
+      requireScope(principal, "resources:write");
+      await requireResourceOwnership(request, principal, options);
+      return;
+    }
+
+    if (route === "/v1/sellers/:sellerId/catalog" && method === "POST") {
+      requireScope(principal, "resources:write");
+      const sellerId = parseSellerIdParam(request);
+      if (sellerId !== principal.sellerId) {
+        throw new LumenError("FORBIDDEN", "API key does not belong to this seller.");
+      }
+      return;
+    }
+
     if (route !== undefined && route.startsWith("/v1/sellers/:sellerId")) {
       const sellerId = parseSellerIdParam(request);
       if (sellerId !== principal.sellerId) {
