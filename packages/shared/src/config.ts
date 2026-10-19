@@ -87,6 +87,7 @@ const envSchema = z.object({
   ENABLE_UPTO_SCHEME: booleanEnv.default(false),
   DEFAULT_ASSET_CODE: z.string().min(1).max(12).default("USDC"),
   STELLAR_TESTNET_RPC_URL: z.string().url().default("https://soroban-testnet.stellar.org"),
+    STELLAR_TESTNET_RPC_URLS: z.string().optional(),
   STELLAR_TESTNET_HORIZON_URL: z.string().url().default("https://horizon-testnet.stellar.org"),
   /**
    * Official testnet USDC issuer: Circle's public testnet issuer.
@@ -105,6 +106,7 @@ const envSchema = z.object({
   TESTNET_LBT_CONTRACT_ID: optionalNonEmptyStringEnv,
   STELLAR_TESTNET_UPTO_SESSION_CONTRACT_ID: optionalNonEmptyStringEnv,
   STELLAR_PUBNET_RPC_URL: z.string().url().default("https://mainnet.sorobanrpc.com"),
+    STELLAR_PUBNET_RPC_URLS: z.string().optional(),
   STELLAR_PUBNET_HORIZON_URL: z.string().url().default("https://horizon.stellar.org"),
   /**
    * Pubnet USDC issuer. Must be explicitly configured for mainnet deployment.
@@ -209,6 +211,7 @@ export function loadConfig(
       displayName: "Stellar Testnet",
       passphrase: stellarPassphrases["stellar:testnet"],
       rpcUrl: env.STELLAR_TESTNET_RPC_URL,
+      rpcUrls: parseUrlList(env.STELLAR_TESTNET_RPC_URLS) ?? [env.STELLAR_TESTNET_RPC_URL],
       horizonUrl: env.STELLAR_TESTNET_HORIZON_URL,
       assets: [testnetAsset],
       ...(env.STELLAR_TESTNET_UPTO_SESSION_CONTRACT_ID === undefined
@@ -220,6 +223,7 @@ export function loadConfig(
       displayName: "Stellar Pubnet",
       passphrase: stellarPassphrases["stellar:pubnet"],
       rpcUrl: env.STELLAR_PUBNET_RPC_URL,
+      rpcUrls: parseUrlList(env.STELLAR_PUBNET_RPC_URLS) ?? [env.STELLAR_PUBNET_RPC_URL],
       horizonUrl: env.STELLAR_PUBNET_HORIZON_URL,
       assets: [
         {
@@ -250,6 +254,7 @@ export function loadConfig(
       publicUrl: env.API_PUBLIC_URL,
       corsAllowedOrigins: parseCorsAllowedOrigins(env.CORS_ALLOWED_ORIGINS)
     },
+
     mcp: {
       publicUrl: env.MCP_PUBLIC_URL
     },
@@ -413,4 +418,21 @@ function parseCorsAllowedOrigins(value: string) {
 
     return origin;
   });
+}
+
+function parseUrlList(value: string | undefined): string[] | undefined {
+  if (value === undefined) return undefined;
+  const urls = value
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (urls.length === 0) return undefined;
+  for (const url of urls) {
+    try {
+      new URL(url);
+    } catch {
+      throw new Error(`Invalid URL in comma-separated list: ${url}`);
+    }
+  }
+  return urls;
 }

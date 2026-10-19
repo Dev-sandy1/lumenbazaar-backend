@@ -129,3 +129,94 @@ export async function probeHorizonEndpoint(horizonUrl: string, timeoutMs = 2_000
     throw new Error(`Horizon returned HTTP ${response.status}.`);
   }
 }
+
+
+import {
+  getCircuitSnapshot,
+  isEndpointAvailable,
+  recordFailure,
+  recordSuccess
+} from "./circuitBreaker.js";
+
+export type FailoverProbeOptions = {
+  timeoutMs?: number;
+  failureThreshold?: number;
+  cooldownMs?: number;
+};
+
+export type FailoverProbeResult = {
+  succeeded: boolean;
+  endpoint?: string;
+  errors: Array<{ endpoint: string; message: string }>;
+};
+
+/**
+ * Probe a list of RPC endpoints, honouring circuit state, until one succeeds.
+ *
+ * Endpoints whose circuit is OPEN are skipped without a probe. Every
+ * attempted endpoint updates its circuit on success or failure.
+ *
+ * Returns `{ succeeded: false }` when all endpoints are either skipped
+ * (open) or fail. Raw error messages are retained here for caller-side
+ * redaction — callers MUST redact before surfacing.
+ */
+export async function probeRpcEndpointsWithFailover(
+  rpcUrls: readonly string[],
+  options: FailoverProbeOptions = {}
+): Promise<FailoverProbeResult> {
+  return probeListWithFailover(rpcUrls, probeRpcEndpoint, options);
+}
+
+export async function probeHorizonEndpointsWithFailover(
+  horizonUrls: readonly string[],
+  options: FailoverProbeOptions = {}
+): Promise<FailoverProbeResult> {
+  return probeListWithFailover(horizonUrls, probeHorizonEndpoint, options);
+}
+
+async function probeListWithFailover(
+  urls: readonly string[],
+  probe: (url: string, timeoutMs?: number) => Promise<void>,
+  options: FailoverProbeOptions
+): Promise<FailoverProbeResult> {
+  const errors: Array<{ endpoint: string; message: string }> = [];
+  const circuitOpts = {
+    ...(options.failureThreshold === undefined
+      ? {}
+      : { failureThreshold: options.failureThreshold }),
+    ...(options.cooldownMs === undefined ? {} : { cooldownMs: options.cooldownMs })
+  };
+
+  for (const url of urls) {
+    if (!isEndpointAvailable(url, Date.now(), circuitOpts)) {
+      errors.push({ endpoint: redactUrl(url), message: "circuit open" });
+      continue;
+    }
+
+    try {
+      await probe(url, options.timeoutMs);
+      recordSuccess(url);
+      return { succeeded: true, endpoint: redactUrl(url), errors };
+    } catch (err) {
+      recordFailure(url, circuitOpts);
+      errors.push({
+        endpoint: redactUrl(url),
+        message: err instanceof Error ? err.message : String(err)
+      });
+    }
+  }
+
+  return { succeeded: false, errors };
+}
+
+/** Re-exported so callers don't need to import from two modules. */
+export { getCircuitSnapshot } from "./circuitBreaker.js";
+
+function redactUrl(raw: string): string {
+  try {
+    const parsed = new URL(raw);
+    return `${parsed.protocol}//${parsed.host}`;
+  } catch {
+    return "<invalid-url>";
+  }
+}

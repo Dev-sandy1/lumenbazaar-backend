@@ -31,6 +31,7 @@ export type NetworkConfig = {
   displayName: string;
   passphrase: string;
   rpcUrl: string;
+  rpcUrls: string[];
   horizonUrl: string;
   assets: SupportedAsset[];
   uptoSessionContractId?: string;
