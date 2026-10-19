@@ -117,6 +117,67 @@ describe("loadConfig", () => {
     ).toThrow("FACILITATOR_SIGNING_KEY_VERSION is required");
   });
 
+  it("defaults the signer provider to disabled with the active network", () => {
+    const config = loadConfig({});
+
+    expect(config.signer).toEqual({
+      provider: "disabled",
+      network: "stellar:testnet"
+    });
+  });
+
+  it("accepts a cloud KMS signer provider with required identity fields", () => {
+    const config = loadConfig({
+      FACILITATOR_SIGNER_PROVIDER: "cloud-kms",
+      FACILITATOR_SIGNER_NETWORK: "stellar:testnet",
+      FACILITATOR_SIGNER_KMS_KEY_ID: "projects/test/locations/global/keyRings/ring/cryptoKeys/key",
+      FACILITATOR_SIGNER_KMS_PUBLIC_KEY: "GCYEX7MPJL64ZJ7ABZSPRC7YEBSI7OMC62FFEVFHCZFREBOYJPQDUCYJ"
+    } as never);
+
+    expect(config.signer).toMatchObject({
+      provider: "cloud-kms",
+      network: "stellar:testnet"
+    });
+  });
+
+  it("fails closed when a cloud KMS signer is missing required identity fields", () => {
+    expect(() =>
+      loadConfig({
+        FACILITATOR_SIGNER_PROVIDER: "cloud-kms",
+        FACILITATOR_SIGNER_NETWORK: "stellar:testnet"
+      } as never)
+    ).toThrow(ZodError);
+  });
+
+  it("rejects a cloud KMS signer network that does not match the active network", () => {
+    expect(() =>
+      loadConfig({
+        FACILITATOR_SIGNER_PROVIDER: "cloud-kms",
+        FACILITATOR_SIGNER_NETWORK: "stellar:pubnet",
+        FACILITATOR_SIGNER_KMS_KEY_ID: "projects/test/locations/global/keyRings/ring/cryptoKeys/key",
+        FACILITATOR_SIGNER_KMS_PUBLIC_KEY: "GCYEX7MPJL64ZJ7ABZSPRC7YEBSI7OMC62FFEVFHCZFREBOYJPQDUCYJ"
+      } as never)
+    ).toThrow("FACILITATOR_SIGNER_NETWORK must match the active Stellar network");
+  });
+
+  it("rejects an unknown signer provider", () => {
+    expect(() =>
+      loadConfig({ FACILITATOR_SIGNER_PROVIDER: "unknown-provider" } as never)
+    ).toThrow(ZodError);
+  });
+
+  it("does not fall back to environment signing when cloud KMS is configured", () => {
+    const config = loadConfig({
+      FACILITATOR_SIGNER_PROVIDER: "cloud-kms",
+      FACILITATOR_SIGNER_NETWORK: "stellar:testnet",
+      FACILITATOR_SIGNER_KMS_KEY_ID: "projects/test/locations/global/keyRings/ring/cryptoKeys/key",
+      FACILITATOR_SIGNER_KMS_PUBLIC_KEY: "GCYEX7MPJL64ZJ7ABZSPRC7YEBSI7OMC62FFEVFHCZFREBOYJPQDUCYJ"
+    } as never);
+
+    expect(config.signer.provider).toBe("cloud-kms");
+    expect(config.signer.provider).not.toBe("environment");
+  });
+
   it("parses explicit CORS origins", () => {
     const config = loadConfig({
       CORS_ALLOWED_ORIGINS: "http://localhost:3000,https://frontend.example.test"

@@ -114,11 +114,16 @@ const envSchema = z.object({
   STELLAR_PUBNET_USDC_CONTRACT_ID: optionalNonEmptyStringEnv,
   STELLAR_PUBNET_UPTO_SESSION_CONTRACT_ID: optionalNonEmptyStringEnv,
   FACILITATOR_ACCOUNT: z.string().min(1).default(localIssuerPublicKey),
-  FACILITATOR_SIGNER_PROVIDER: z.enum(["disabled", "environment"]).default("disabled"),
+  FACILITATOR_SIGNER_PROVIDER: z.enum(["disabled", "environment", "kms"]).default("disabled"),
   FACILITATOR_SIGNER_NETWORK: z
     .enum(["stellar:testnet", "stellar:pubnet"])
     .default("stellar:testnet"),
   FACILITATOR_SIGNING_KEY_VERSION: optionalNonEmptyStringEnv,
+  FACILITATOR_KMS_PROVIDER: optionalNonEmptyStringEnv,
+  FACILITATOR_KMS_KEY_ID: optionalNonEmptyStringEnv,
+  FACILITATOR_KMS_REGION: optionalNonEmptyStringEnv,
+  FACILITATOR_KMS_ENDPOINT: optionalNonEmptyStringEnv,
+  FACILITATOR_KMS_TIMEOUT_MS: z.coerce.number().int().positive().default(5_000),
   EVENT_STREAM_SIGNING_SECRET: optionalNonEmptyStringEnv,
   STELLAR_MAX_TRANSACTION_FEE_STROOPS: z.coerce.number().int().positive().default(50_000),
   STELLAR_INCLUSION_FEE_STROOPS: z.coerce.number().int().positive().default(100)
@@ -146,6 +151,13 @@ export type AppConfig = {
     provider: ParsedEnv["FACILITATOR_SIGNER_PROVIDER"];
     network: NetworkId;
     keyVersion?: string;
+    kms?: {
+      provider: string;
+      keyId: string;
+      region?: string;
+      endpoint?: string;
+      timeoutMs: number;
+    };
   };
   settlement: {
     maxTransactionFeeStroops: number;
@@ -261,7 +273,22 @@ export function loadConfig(
       network: env.FACILITATOR_SIGNER_NETWORK,
       ...(env.FACILITATOR_SIGNING_KEY_VERSION === undefined
         ? {}
-        : { keyVersion: env.FACILITATOR_SIGNING_KEY_VERSION })
+        : { keyVersion: env.FACILITATOR_SIGNING_KEY_VERSION }),
+      ...(env.FACILITATOR_SIGNER_PROVIDER === "kms"
+        ? {
+            kms: {
+              provider: env.FACILITATOR_KMS_PROVIDER as string,
+              keyId: env.FACILITATOR_KMS_KEY_ID as string,
+              ...(env.FACILITATOR_KMS_REGION === undefined
+                ? {}
+                : { region: env.FACILITATOR_KMS_REGION }),
+              ...(env.FACILITATOR_KMS_ENDPOINT === undefined
+                ? {}
+                : { endpoint: env.FACILITATOR_KMS_ENDPOINT }),
+              timeoutMs: env.FACILITATOR_KMS_TIMEOUT_MS
+            }
+          }
+        : {})
     },
     settlement: {
       maxTransactionFeeStroops: env.STELLAR_MAX_TRANSACTION_FEE_STROOPS,
@@ -301,10 +328,20 @@ function assertEnvironmentConfiguration(
   const activeAsset = activeNetwork.assets[0];
 
   if (
-    env.FACILITATOR_SIGNER_PROVIDER === "environment" &&
+    env.FACILITATOR_SIGNER_PROVIDER !== "disabled" &&
     env.FACILITATOR_SIGNER_NETWORK !== activeNetwork.id
   ) {
     throw new Error("FACILITATOR_SIGNER_NETWORK must match the active Stellar network.");
+  }
+
+  if (env.FACILITATOR_SIGNER_PROVIDER === "kms") {
+    if (env.FACILITATOR_KMS_PROVIDER === undefined) {
+      throw new Error("FACILITATOR_KMS_PROVIDER is required when FACILITATOR_SIGNER_PROVIDER=kms.");
+    }
+
+    if (env.FACILITATOR_KMS_KEY_ID === undefined) {
+      throw new Error("FACILITATOR_KMS_KEY_ID is required when FACILITATOR_SIGNER_PROVIDER=kms.");
+    }
   }
 
   // Enforce USDC default for testnet exact payments
