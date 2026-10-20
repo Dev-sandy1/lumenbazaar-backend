@@ -5,6 +5,7 @@ import Fastify from "fastify";
 
 import {
   type AppConfig,
+  getReleaseCommit,
   listConfiguredNetworks,
   loadConfig,
   runWithCorrelationId
@@ -62,7 +63,7 @@ import { ResourceService } from "./services/resources.js";
 import { SearchService } from "./services/search.js";
 import { SellerApiKeyService } from "./services/sellerApiKeys.js";
 import { SellerService } from "./services/sellers.js";
-import { WebhookService } from "./services/webhooks.js";
+import type { WebhookService } from "./services/webhooks.js";
 import { WebhookEventService } from "./services/webhookEvents.js";
 
 export type BuildApiAppOptions = {
@@ -254,7 +255,8 @@ export function buildApiApp(options: BuildApiAppOptions = {}) {
     app.addHook("onReady", async () => {
       capRegistry = await buildCapabilityRegistry({
         exactAdapter: runtimeAdapter,
-        uptoService: options.paymentSessionService === undefined ? paymentSessionService : undefined,
+        uptoService:
+          options.paymentSessionService === undefined ? paymentSessionService : undefined,
         networks: listConfiguredNetworks(config).map((n) => n.id),
         allowedCapabilities: options.paymentCapabilities,
         checkOptions: { timeoutMs: 5_000 },
@@ -295,7 +297,10 @@ export function buildApiApp(options: BuildApiAppOptions = {}) {
           options.paymentCapabilities?.upto !== undefined
             ? config.features.uptoScheme && options.paymentCapabilities.upto
             : undefined,
-        capabilityRegistry: () => getCapabilityRegistry()
+        capabilityRegistry: () => getCapabilityRegistry(),
+        isLive: config.lumenEnv !== "local" && config.lumenEnv !== "test",
+        commit: getReleaseCommit(),
+        x402PackageVersion: "2.28.0"
       }
     );
 
@@ -319,6 +324,7 @@ export function buildApiApp(options: BuildApiAppOptions = {}) {
   }
 
   const webhookEventService = options.webhookEventService ?? new WebhookEventService();
+  void webhookEventService;
 
   registerFacilitatorRoutes(app, {
     config,

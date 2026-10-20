@@ -58,10 +58,14 @@ describe("conformance routes", () => {
       network: "stellar:testnet",
       suite: "stellar-x402",
       status: "passed",
+      mode: "local",
+      x402Version: 2,
+      x402PackageVersion: "2.28.0",
       passedCount: 0,
       failedCount: 0,
       reservedCount: 6
     });
+    expect(created.json().commit).toBeDefined();
     expect(
       created.json().results.map((result: { id: string; status: string }) => ({
         id: result.id,
@@ -77,6 +81,37 @@ describe("conformance routes", () => {
     ]);
     expect(listed.json()).toEqual([created.json()]);
     expect(fetched.json()).toEqual(created.json());
+
+    // Filtering by mode
+    const filteredLocal = await app.inject({
+      method: "GET",
+      url: "/v1/conformance/runs?mode=local"
+    });
+    expect(filteredLocal.json()).toHaveLength(1);
+
+    const filteredLive = await app.inject({
+      method: "GET",
+      url: "/v1/conformance/runs?mode=live"
+    });
+    expect(filteredLive.json()).toHaveLength(0);
+
+    // Rejection of claiming live mode without live deployment
+    const rejectedLive = await app.inject({
+      method: "POST",
+      url: "/v1/conformance/runs",
+      payload: {
+        network: "stellar:testnet",
+        mode: "live"
+      }
+    });
+    expect(rejectedLive.statusCode).toBe(400);
+    expect(rejectedLive.json()).toMatchObject({
+      ok: false,
+      error: {
+        code: "VALIDATION_FAILED",
+        message: expect.stringContaining("Cannot claim live conformance")
+      }
+    });
 
     await app.close();
   });

@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import {
   LumenError,
+  getReleaseCommit,
   listConfiguredNetworks,
   localIssuerPublicKey,
   type AppConfig,
@@ -15,6 +16,7 @@ import {
   type PaymentVerificationService,
   type SettlementService
 } from "@lumenbazaar/stellar-payments";
+import { type CapabilityRegistry } from "./capabilityRegistry.js";
 
 export type ConformanceCaseDefinition = {
   description: string;
@@ -53,6 +55,10 @@ export type ConformanceRunRecord = {
   startedAt: string;
   status: "passed" | "failed";
   suite: "stellar-x402";
+  mode: "local" | "live";
+  commit: string;
+  x402Version: 2;
+  x402PackageVersion: string;
 };
 
 export type ConformanceCaseRunner = (
@@ -79,17 +85,23 @@ export type ConformanceRunServiceOptions = {
    * `exactEnabled` / `uptoEnabled` may still be used to further restrict
    * (never to expand) what the registry reports.
    */
-  capabilityRegistry?: () => import("./capabilityRegistry.js").CapabilityRegistry;
+  capabilityRegistry?: () => CapabilityRegistry;
+  /** True only when deployed tests passed in a live environment. */
+  isLive?: boolean;
+  commit?: string;
+  x402PackageVersion?: string;
 };
 
 export const runConformanceSchema = z.object({
   network: z.enum(["stellar:testnet", "stellar:pubnet"]).default("stellar:testnet"),
-  includeReserved: z.boolean().default(true)
+  includeReserved: z.boolean().default(true),
+  mode: z.enum(["local", "live"]).default("local")
 });
 
 export const listConformanceRunsSchema = z.object({
   network: z.enum(["stellar:testnet", "stellar:pubnet"]).optional(),
   status: z.enum(["passed", "failed"]).optional(),
+  mode: z.enum(["local", "live"]).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(20)
 });
 
@@ -118,6 +130,7 @@ export class InMemoryConformanceRunStore implements ConformanceRunStore {
     return [...this.runs.values()]
       .filter((run) => filters.network === undefined || run.network === filters.network)
       .filter((run) => filters.status === undefined || run.status === filters.status)
+      .filter((run) => filters.mode === undefined || run.mode === filters.mode)
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
       .slice(0, filters.limit);
   }
@@ -134,6 +147,13 @@ export class ConformanceRunService {
     const request = runConformanceSchema.parse(input ?? {});
     const startedAt = new Date().toISOString();
 
+    if (request.mode === "live" && this.options.isLive !== true) {
+      throw new LumenError(
+        "VALIDATION_FAILED",
+        "Cannot claim live conformance unless deployed tests passed in a live environment."
+      );
+    }
+
     // Determine enabled flags: prefer registry over static options when both
     // are available. The registry can only restrict, never expand, what the
     // static options say.
@@ -146,9 +166,10 @@ export class ConformanceRunService {
       const registryUpto = registry.isSupported("upto", request.network);
       // Registry takes precedence: if it says unavailable, override static.
       exactEnabled = exactEnabled && registryExact;
-      uptoEnabled = uptoEnabled || registryUpto;
-      // But registry can never *add* exact if static opts explicitly disable it.
+      uptoEnabled = uptoEnabled && registryUpto;
+      // But registry can never *add* capabilities if static opts explicitly disable them.
       if (this.options.exactEnabled === false) exactEnabled = false;
+      if (this.options.uptoEnabled === false) uptoEnabled = false;
     }
 
     const definitions = conformanceDefinitions(
@@ -178,7 +199,11 @@ export class ConformanceRunService {
       results,
       startedAt,
       status: failedCount === 0 ? "passed" : "failed",
-      suite: "stellar-x402"
+      suite: "stellar-x402",
+      mode: request.mode,
+      commit: this.options.commit ?? getReleaseCommit(),
+      x402Version: 2,
+      x402PackageVersion: this.options.x402PackageVersion ?? "2.28.0"
     });
   }
 
@@ -205,16 +230,12 @@ export class ConformanceRunService {
       const registryExact = registry.isSupported("exact", network);
       const registryUpto = registry.isSupported("upto", network);
       exactEnabled = exactEnabled && registryExact;
-      uptoEnabled = uptoEnabled || registryUpto;
+      uptoEnabled = uptoEnabled && registryUpto;
       if (this.options.exactEnabled === false) exactEnabled = false;
+      if (this.options.uptoEnabled === false) uptoEnabled = false;
     }
 
-    return conformanceDefinitions(
-      network,
-      true,
-      uptoEnabled,
-      exactEnabled
-    );
+    return conformanceDefinitions(network, true, uptoEnabled, exactEnabled);
   }
 
   private async runCase(definition: ConformanceCaseDefinition): Promise<ConformanceCaseResult> {
@@ -558,4 +579,139 @@ function uptoPaymentSessionRequest(config: AppConfig, network: NetworkId, seed: 
 
 function digest(value: string) {
   return createHash("sha256").update(value).digest("hex");
+}
+
+export type ConformanceSpecification = {
+  suite: "stellar-x402";
+  version: string;
+  commit: string;
+  protocol: {
+    name: "x402";
+    version: number;
+    package: string;
+    packageVersion: string;
+    stellarPackage: string;
+    stellarPackageVersion: string;
+  };
+  compatibility: {
+    networks: NetworkId[];
+    schemes: Array<"exact" | "upto">;
+  };
+  executionModes: {
+    local: {
+      description: string;
+      verifiedOnChain: boolean;
+    };
+    live: {
+      description: string;
+      verifiedOnChain: boolean;
+    };
+  };
+  cases: {
+    testnet: ConformanceCaseDefinition[];
+    pubnet: ConformanceCaseDefinition[];
+  };
+};
+
+export function buildConformanceSpec(
+  options: {
+    commit?: string;
+    version?: string;
+    x402PackageVersion?: string;
+    x402StellarPackageVersion?: string;
+  } = {}
+): ConformanceSpecification {
+  const commit = options.commit ?? getReleaseCommit();
+  const version = options.version ?? "0.1.0";
+  const x402PackageVersion = options.x402PackageVersion ?? "2.28.0";
+  const x402StellarPackageVersion = options.x402StellarPackageVersion ?? "2.28.0";
+
+  return {
+    suite: "stellar-x402",
+    version,
+    commit,
+    protocol: {
+      name: "x402",
+      version: 2,
+      package: "@x402/core",
+      packageVersion: x402PackageVersion,
+      stellarPackage: "@x402/stellar",
+      stellarPackageVersion: x402StellarPackageVersion
+    },
+    compatibility: {
+      networks: ["stellar:testnet", "stellar:pubnet"],
+      schemes: ["exact", "upto"]
+    },
+    executionModes: {
+      local: {
+        description:
+          "In-memory and simulated execution validating protocol schemas, serialization, and status transitions without submitting transactions to live networks.",
+        verifiedOnChain: false
+      },
+      live: {
+        description:
+          "Execution against deployed live network infrastructure requiring on-chain transaction finality and Horizon validation. Cannot be claimed unless deployed tests passed.",
+        verifiedOnChain: true
+      }
+    },
+    cases: {
+      testnet: conformanceDefinitions("stellar:testnet", true, true, true),
+      pubnet: conformanceDefinitions("stellar:pubnet", true, true, true)
+    }
+  };
+}
+
+export function renderConformanceMarkdown(spec: ConformanceSpecification = buildConformanceSpec()) {
+  const lines = [
+    "# LumenBazaar x402 Conformance Specification",
+    "",
+    "Generated from `apps/api/src/services/conformance.ts`. Do not edit this file manually.",
+    "",
+    `Suite: \`${spec.suite}\``,
+    `API Version: \`${spec.version}\``,
+    `Source Commit: \`${spec.commit}\``,
+    `Protocol: \`${spec.protocol.name} v${spec.protocol.version}\``,
+    `Core Package: \`${spec.protocol.package}@${spec.protocol.packageVersion}\``,
+    `Stellar Package: \`${spec.protocol.stellarPackage}@${spec.protocol.stellarPackageVersion}\``,
+    "",
+    "## Execution Modes",
+    "",
+    "- **`local`**: In-memory and simulation-based protocol checks. Validates schemas and states without ledger interaction.",
+    "- **`live`**: Deployed network checks with real transaction finality. Only claimed when deployed tests pass.",
+    "",
+    "## Conformance Cases (Testnet)",
+    "",
+    "| ID | Scheme | Endpoint | Method | Description |",
+    "| --- | --- | --- | --- | --- |"
+  ];
+
+  for (const item of spec.cases.testnet) {
+    lines.push(
+      `| \`${item.id}\` | \`${item.scheme}\` | \`${item.endpoint}\` | \`${item.method}\` | ${item.description} |`
+    );
+  }
+
+  lines.push(
+    "",
+    "## Conformance Cases (Pubnet)",
+    "",
+    "| ID | Scheme | Endpoint | Method | Description |",
+    "| --- | --- | --- | --- | --- |"
+  );
+
+  for (const item of spec.cases.pubnet) {
+    lines.push(
+      `| \`${item.id}\` | \`${item.scheme}\` | \`${item.endpoint}\` | \`${item.method}\` | ${item.description} |`
+    );
+  }
+
+  lines.push(
+    "",
+    "## Verification & Drift Rejection",
+    "",
+    "- CI rejects drift from source schemas via `pnpm openapi:check`.",
+    "- Published checksums in `docs/api/checksums.json` and `docs/api/checksums.sha256` ensure artifact immutability."
+  );
+
+  return `${lines.join("\n")}\n`;
 }

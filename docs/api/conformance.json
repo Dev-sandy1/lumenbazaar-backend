@@ -1,0 +1,141 @@
+{
+  "suite": "stellar-x402",
+  "version": "0.1.0",
+  "commit": "737e891baa49e202a7f4f4d8424177f0c7b99c43",
+  "protocol": {
+    "name": "x402",
+    "version": 2,
+    "package": "@x402/core",
+    "packageVersion": "2.28.0",
+    "stellarPackage": "@x402/stellar",
+    "stellarPackageVersion": "2.28.0"
+  },
+  "compatibility": {
+    "networks": ["stellar:testnet", "stellar:pubnet"],
+    "schemes": ["exact", "upto"]
+  },
+  "executionModes": {
+    "local": {
+      "description": "In-memory and simulated execution validating protocol schemas, serialization, and status transitions without submitting transactions to live networks.",
+      "verifiedOnChain": false
+    },
+    "live": {
+      "description": "Execution against deployed live network infrastructure requiring on-chain transaction finality and Horizon validation. Cannot be claimed unless deployed tests passed.",
+      "verifiedOnChain": true
+    }
+  },
+  "cases": {
+    "testnet": [
+      {
+        "id": "exact-supported",
+        "name": "GET /v1/supported returns exact scheme",
+        "description": "Checks that the facilitator advertises exact Stellar x402 support.",
+        "endpoint": "/v1/supported",
+        "method": "GET",
+        "network": "stellar:testnet",
+        "scheme": "exact"
+      },
+      {
+        "id": "exact-verify",
+        "name": "POST /v1/verify accepts exact payment",
+        "description": "Checks that exact payment payloads are accepted by verification.",
+        "endpoint": "/v1/verify",
+        "method": "POST",
+        "network": "stellar:testnet",
+        "scheme": "exact"
+      },
+      {
+        "id": "exact-settle",
+        "name": "POST /v1/settle processes exact payment",
+        "description": "Checks that a verified exact payment can be settled.",
+        "endpoint": "/v1/settle",
+        "method": "POST",
+        "network": "stellar:testnet",
+        "scheme": "exact"
+      },
+      {
+        "id": "upto-supported",
+        "name": "GET /v1/supported advertises upto readiness",
+        "description": "Checks that the facilitator advertises deployed capped session support.",
+        "endpoint": "/v1/supported",
+        "method": "GET",
+        "network": "stellar:testnet",
+        "scheme": "upto"
+      },
+      {
+        "id": "upto-session-create",
+        "name": "POST /v1/payment-sessions creates upto session",
+        "description": "Checks that capped session creation returns a contract-backed session.",
+        "endpoint": "/v1/payment-sessions",
+        "method": "POST",
+        "network": "stellar:testnet",
+        "scheme": "upto"
+      },
+      {
+        "id": "upto-settle",
+        "name": "POST /v1/payment-sessions/{sessionId}/settle processes upto draw",
+        "description": "Checks that capped session settlement succeeds without the exact route.",
+        "endpoint": "/v1/payment-sessions/{sessionId}/settle",
+        "method": "POST",
+        "network": "stellar:testnet",
+        "scheme": "upto"
+      }
+    ],
+    "pubnet": [
+      {
+        "id": "exact-supported",
+        "name": "GET /v1/supported returns exact scheme",
+        "description": "Checks that the facilitator advertises exact Stellar x402 support.",
+        "endpoint": "/v1/supported",
+        "method": "GET",
+        "network": "stellar:pubnet",
+        "scheme": "exact"
+      },
+      {
+        "id": "exact-verify",
+        "name": "POST /v1/verify accepts exact payment",
+        "description": "Checks that exact payment payloads are accepted by verification.",
+        "endpoint": "/v1/verify",
+        "method": "POST",
+        "network": "stellar:pubnet",
+        "scheme": "exact"
+      },
+      {
+        "id": "exact-settle",
+        "name": "POST /v1/settle processes exact payment",
+        "description": "Checks that a verified exact payment can be settled.",
+        "endpoint": "/v1/settle",
+        "method": "POST",
+        "network": "stellar:pubnet",
+        "scheme": "exact"
+      },
+      {
+        "id": "upto-supported",
+        "name": "GET /v1/supported advertises upto readiness",
+        "description": "Checks that the facilitator advertises deployed capped session support.",
+        "endpoint": "/v1/supported",
+        "method": "GET",
+        "network": "stellar:pubnet",
+        "scheme": "upto"
+      },
+      {
+        "id": "upto-session-create",
+        "name": "POST /v1/payment-sessions creates upto session",
+        "description": "Checks that capped session creation returns a contract-backed session.",
+        "endpoint": "/v1/payment-sessions",
+        "method": "POST",
+        "network": "stellar:pubnet",
+        "scheme": "upto"
+      },
+      {
+        "id": "upto-settle",
+        "name": "POST /v1/payment-sessions/{sessionId}/settle processes upto draw",
+        "description": "Checks that capped session settlement succeeds without the exact route.",
+        "endpoint": "/v1/payment-sessions/{sessionId}/settle",
+        "method": "POST",
+        "network": "stellar:pubnet",
+        "scheme": "upto"
+      }
+    ]
+  }
+}
