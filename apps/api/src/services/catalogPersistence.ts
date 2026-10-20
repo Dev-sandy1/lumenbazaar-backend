@@ -7,6 +7,7 @@ import { Redis } from "ioredis";
 import {
   decodeCursor,
   encodeCursor,
+  getTraceparent,
   isSellerApiKeyScope,
   isSupportedNetwork,
   LumenError,
@@ -384,7 +385,9 @@ class BullMqResourceIndexingQueue implements ResourceIndexingQueue {
   constructor(private readonly queue: Queue<ResourceIndexingJob>) {}
 
   async addResourceIndexingJob(job: ResourceIndexingJob) {
-    await this.queue.add(job.name, job, {
+    const traceparent = getTraceparent();
+    const data = traceparent === undefined ? job : { ...job, traceparent };
+    await this.queue.add(job.name, data, {
       jobId: `resource-index-${job.resourceId}-${job.versionId}`,
       attempts: 5,
       backoff: { type: "exponential", delay: 1000 },
