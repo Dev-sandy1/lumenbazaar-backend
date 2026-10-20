@@ -120,8 +120,10 @@ export class PrismaSettlementStore implements SettlementStore {
     return row === null ? undefined : mapSettlement(row);
   }
 
-  async getSettlementByTransactionHash(transactionHash: string) {
-    const row = await this.db.settlement.findUnique({ where: { transactionHash } });
+  async getSettlementByTransactionHash(transactionHash: string, network: string) {
+    const row = await this.db.settlement.findUnique({
+      where: { transactionHash_network: { transactionHash, network } }
+    });
     return row === null ? undefined : mapSettlement(row);
   }
 }
@@ -130,6 +132,16 @@ export class PrismaReceiptStore implements ReceiptStore {
   constructor(private readonly db: PaymentDatabaseClient) {}
 
   async createReceipt(input: CreateReceiptInput) {
+    const existing = await this.db.receipt.findUnique({
+      where: { paymentAttemptId: input.paymentAttemptId },
+      select: { status: true }
+    });
+    if (existing !== null) {
+      if (existing.status === "finalized") {
+        throw new LumenError("REPLAY_DETECTED", "Finalized receipt evidence cannot be overwritten.");
+      }
+      throw new LumenError("REPLAY_DETECTED", "Payment evidence already exists.");
+    }
     try {
       return mapReceipt(await this.db.receipt.create({ data: receiptData(input) }));
     } catch (error) {

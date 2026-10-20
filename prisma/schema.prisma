@@ -169,7 +169,7 @@ model Settlement {
   id                     String         @id @default(cuid())
   correlationId          String         @db.VarChar(64)
   paymentAttemptId       String         @unique
-  transactionHash        String?        @unique
+  transactionHash        String?
   ledger                 Int?
   network                String
   amount                 Decimal        @db.Decimal(24, 7)
@@ -184,6 +184,7 @@ model Settlement {
   createdAt              DateTime       @default(now())
   paymentAttempt         PaymentAttempt @relation(fields: [paymentAttemptId], references: [id], onDelete: Restrict)
 
+  @@unique([transactionHash, network])
   @@index([network, status])
   @@index([ledger])
   @@index([reconciliationState, lastReconciledAt])

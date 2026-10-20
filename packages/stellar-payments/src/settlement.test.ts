@@ -49,7 +49,7 @@ describe("SettlementService", () => {
       status: "confirmed"
     });
 
-    await expect(settlement.getSettlementByTransactionHash("tx_exact_123")).resolves.toMatchObject({
+    await expect(settlement.getSettlementByTransactionHash("tx_exact_123", "stellar:testnet")).resolves.toMatchObject({
       paymentAttemptId: verified.paymentAttemptId,
       status: "confirmed"
     });
@@ -198,7 +198,7 @@ describe("SettlementService", () => {
       code: "SETTLEMENT_FAILED",
       details: { status, transactionHash: hash }
     });
-    await expect(settlement.getSettlementByTransactionHash(hash)).resolves.toMatchObject({
+    await expect(settlement.getSettlementByTransactionHash(hash, "stellar:testnet")).resolves.toMatchObject({
       paymentAttemptId: verified.paymentAttemptId,
       status
     });

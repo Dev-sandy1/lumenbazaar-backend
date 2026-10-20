@@ -219,8 +219,8 @@ export class SettlementService {
     };
   }
 
-  async getSettlementByTransactionHash(transactionHash: string) {
-    return this.settlementStore.getSettlementByTransactionHash(transactionHash);
+  async getSettlementByTransactionHash(transactionHash: string, network: string) {
+    return this.settlementStore.getSettlementByTransactionHash(transactionHash, network);
   }
 
   getReceiptService() {
