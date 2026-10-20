@@ -8,8 +8,6 @@ import {
   redactSensitiveText
 } from "@lumenbazaar/shared";
 import { settlementReconciliationJobId } from "@lumenbazaar/stellar-payments";
-
-import { enqueueSettlementConfirmation } from "./jobQueue.js";
 import { createBullMqConnection, createBullMqQueue, queueNames, type QueueName } from "./queues.js";
 import { handleNetworkHealth, type NetworkHealthJobData } from "./workers/networkHealth.js";
 import { handleOutboxRelay, type OutboxRelayJobData } from "./workers/outboxRelay.js";
@@ -26,6 +24,7 @@ import { handleSearchSync, type SearchSyncJobData } from "./workers/searchSync.j
 import {
   handleSettlementConfirmation,
   markReconciliationDeadLetter,
+  resumePendingSettlements,
   type SettlementConfirmationJobData
 } from "./workers/settlementConfirmation.js";
 import {
@@ -243,42 +242,7 @@ export class BullMqWorkerBackend implements WorkerBackend {
   }
 
   private async resumePendingSettlements() {
-    const db = getPrismaClient();
-    const attempts = await db.paymentAttempt.findMany({
-      where: {
-        OR: [
-          { status: "settling", settlement: null },
-          {
-            settlement: {
-              is: {
-                transactionHash: { not: null },
-                OR: [
-                  { reconciliationState: "pending" },
-                  { status: { in: ["pending", "submitted", "timed_out"] } }
-                ]
-              }
-            }
-          }
-        ]
-      },
-      include: { settlement: true },
-      take: 1000
-    });
-    for (const attempt of attempts) {
-      await enqueueSettlementConfirmation(this.settlementQueue, {
-        correlationId: attempt.correlationId,
-        paymentAttemptId: attempt.id,
-        network: attempt.network,
-        ...(attempt.settlement === null
-          ? {}
-          : {
-              settlementId: attempt.settlement.id,
-              ...(attempt.settlement.transactionHash === null
-                ? {}
-                : { transactionHash: attempt.settlement.transactionHash })
-            })
-      });
-    }
+    await resumePendingSettlements(getPrismaClient(), this.settlementQueue);
   }
 
   private async deadLetterSettlement(job: Job<SettlementConfirmationJobData>, error: Error) {
