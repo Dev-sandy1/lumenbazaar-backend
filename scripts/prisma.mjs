@@ -11,7 +11,9 @@ if (!existsSync(schemaPath)) {
 
 process.env.DATABASE_URL ??= "postgresql://postgres:postgres@localhost:5432/lumenbazaar";
 
-const result = spawnSync("pnpm", ["exec", "prisma", command, "--schema", schemaPath], {
+const pnpmCommand = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
+
+const result = spawnSync(pnpmCommand, ["exec", "prisma", command, "--schema", schemaPath], {
   env: process.env,
   shell: true,
   stdio: "inherit"

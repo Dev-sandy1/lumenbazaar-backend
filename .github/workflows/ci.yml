@@ -33,6 +33,12 @@ jobs:
       - name: Run checks
         run: pnpm check
 
+      - name: Verify release artifact checksums
+        run: |
+          cd docs/api
+          sha256sum -c checksums.sha256
+          cd ../..
+
       - name: Audit production dependencies
         run: pnpm audit --prod --audit-level high
 

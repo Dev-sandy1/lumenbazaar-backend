@@ -119,4 +119,88 @@ describe("ConformanceRunService", () => {
     ]);
     expect(run.results.filter((result) => result.scheme === "upto")).toHaveLength(3);
   });
+
+  it("labels runs with mode, commit, and x402 package version", async () => {
+    const runner = vi.fn(async () => undefined);
+    const service = new ConformanceRunService(runner, undefined, {
+      commit: "abc123commit",
+      x402PackageVersion: "2.28.0"
+    });
+
+    const run = await service.run({ network: "stellar:testnet", mode: "local" });
+
+    expect(run.mode).toBe("local");
+    expect(run.commit).toBe("abc123commit");
+    expect(run.x402Version).toBe(2);
+    expect(run.x402PackageVersion).toBe("2.28.0");
+  });
+
+  it("rejects live mode claims when not running in a verified live environment", async () => {
+    const runner = vi.fn(async () => undefined);
+    const localService = new ConformanceRunService(runner, undefined, { isLive: false });
+
+    await expect(localService.run({ network: "stellar:testnet", mode: "live" })).rejects.toThrow(
+      "Cannot claim live conformance unless deployed tests passed in a live environment."
+    );
+  });
+
+  it("accepts live mode when verified live environment is configured", async () => {
+    const runner = vi.fn(async () => undefined);
+    const liveService = new ConformanceRunService(runner, undefined, {
+      isLive: true,
+      commit: "livecommit789",
+      x402PackageVersion: "2.28.0"
+    });
+
+    const run = await liveService.run({ network: "stellar:testnet", mode: "live" });
+
+    expect(run.mode).toBe("live");
+    expect(run.status).toBe("passed");
+    expect(run.commit).toBe("livecommit789");
+  });
+
+  it("filters runs by mode (local vs live)", async () => {
+    const runner = vi.fn(async () => undefined);
+    const service = new ConformanceRunService(runner, undefined, { isLive: true });
+
+    const localRun = await service.run({ network: "stellar:testnet", mode: "local" });
+    const liveRun = await service.run({ network: "stellar:testnet", mode: "live" });
+
+    const localList = await service.list({ mode: "local" });
+    expect(localList.map((r) => r.id)).toEqual([localRun.id]);
+
+    const liveList = await service.list({ mode: "live" });
+    expect(liveList.map((r) => r.id)).toEqual([liveRun.id]);
+  });
+
+  it("builds immutable conformance specification with release and compatibility metadata", async () => {
+    const { buildConformanceSpec, renderConformanceMarkdown } = await import("./conformance.js");
+    const spec = buildConformanceSpec({
+      commit: "testsha456",
+      version: "0.1.0",
+      x402PackageVersion: "2.28.0"
+    });
+
+    expect(spec.suite).toBe("stellar-x402");
+    expect(spec.version).toBe("0.1.0");
+    expect(spec.commit).toBe("testsha456");
+    expect(spec.protocol).toEqual({
+      name: "x402",
+      version: 2,
+      package: "@x402/core",
+      packageVersion: "2.28.0",
+      stellarPackage: "@x402/stellar",
+      stellarPackageVersion: "2.28.0"
+    });
+    expect(spec.executionModes.local.verifiedOnChain).toBe(false);
+    expect(spec.executionModes.live.verifiedOnChain).toBe(true);
+    expect(spec.cases.testnet.length).toBeGreaterThanOrEqual(6);
+    expect(spec.cases.pubnet.length).toBeGreaterThanOrEqual(6);
+
+    const markdown = renderConformanceMarkdown(spec);
+    expect(markdown).toContain("Source Commit: `testsha456`");
+    expect(markdown).toContain("Core Package: `@x402/core@2.28.0`");
+    expect(markdown).toContain("## Execution Modes");
+    expect(markdown).toContain("## Conformance Cases (Testnet)");
+  });
 });

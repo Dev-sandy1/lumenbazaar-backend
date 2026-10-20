@@ -6,7 +6,6 @@ export * from "./amounts.js";
 export * from "./addresses.js";
 export * from "./clients.js";
 export * from "./facilitatorSigner.js";
-export * from "./kmsFacilitatorSigner.js";
 export * from "./hash.js";
 export * from "./paymentAttemptStore.js";
 export * from "./paymentStatePersistence.js";

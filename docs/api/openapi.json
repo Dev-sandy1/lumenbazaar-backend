@@ -4,6 +4,20 @@
     "title": "LumenBazaar Backend API",
     "version": "0.1.0",
     "description": "Facilitator, seller catalog, discovery, and conformance APIs for LumenBazaar.",
+    "x-release": {
+      "commit": "737e891baa49e202a7f4f4d8424177f0c7b99c43",
+      "version": "0.1.0",
+      "protocol": "stellar-x402",
+      "x402Version": 2,
+      "x402PackageVersion": "2.28.0"
+    },
+    "x-compatibility": {
+      "protocol": "x402",
+      "x402Version": 2,
+      "x402PackageVersion": "2.28.0",
+      "supportedSchemes": ["exact", "upto"],
+      "networks": ["stellar:testnet", "stellar:pubnet"]
+    },
     "x-rate-limiting": {
       "description": "The API implements distributed rate limiting across all replicas using Redis. Each endpoint scope has different limits per 60-second window.",
       "scopes": {
@@ -5822,6 +5836,129 @@
         }
       }
     },
+    "/v1/sellers/{sellerId}/catalog": {
+      "post": {
+        "operationId": "catalogResourceForSeller",
+        "summary": "Catalog a resource for a seller using an authenticated API key.",
+        "tags": ["discovery", "sellers"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "type": "object", "additionalProperties": true } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "headers": {
+              "x-ratelimit-limit": {
+                "description": "Maximum number of requests allowed in the current rate limit window.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-remaining": {
+                "description": "Number of requests remaining in the current rate limit window. Zero means limit reached.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-reset": {
+                "description": "ISO 8601 timestamp when the current rate limit window resets.",
+                "schema": { "type": "string", "format": "date-time" }
+              },
+              "retry-after": {
+                "description": "Number of seconds to wait before retrying. Only present in 429 responses. Per RFC 6585.",
+                "schema": { "type": "integer", "minimum": 1 }
+              }
+            },
+            "content": {
+              "application/json": { "schema": { "type": "object", "additionalProperties": true } }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded. The client must wait before retrying. See Retry-After header.",
+            "headers": {
+              "x-ratelimit-limit": {
+                "description": "Maximum number of requests allowed in the current rate limit window.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-remaining": {
+                "description": "Number of requests remaining in the current rate limit window. Zero means limit reached.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-reset": {
+                "description": "ISO 8601 timestamp when the current rate limit window resets.",
+                "schema": { "type": "string", "format": "date-time" }
+              },
+              "retry-after": {
+                "description": "Number of seconds to wait before retrying. Only present in 429 responses. Per RFC 6585.",
+                "schema": { "type": "integer", "minimum": 1 }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "error"],
+                  "properties": {
+                    "ok": { "type": "boolean", "enum": [false] },
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": { "type": "string" },
+                        "message": { "type": "string" },
+                        "details": { "type": "object", "additionalProperties": true }
+                      }
+                    },
+                    "requestId": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error response",
+            "headers": {
+              "x-ratelimit-limit": {
+                "description": "Maximum number of requests allowed in the current rate limit window.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-remaining": {
+                "description": "Number of requests remaining in the current rate limit window. Zero means limit reached.",
+                "schema": { "type": "integer" }
+              },
+              "x-ratelimit-reset": {
+                "description": "ISO 8601 timestamp when the current rate limit window resets.",
+                "schema": { "type": "string", "format": "date-time" }
+              },
+              "retry-after": {
+                "description": "Number of seconds to wait before retrying. Only present in 429 responses. Per RFC 6585.",
+                "schema": { "type": "integer", "minimum": 1 }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "error"],
+                  "properties": {
+                    "ok": { "type": "boolean", "enum": [false] },
+                    "error": {
+                      "type": "object",
+                      "required": ["code", "message"],
+                      "properties": {
+                        "code": { "type": "string" },
+                        "message": { "type": "string" },
+                        "details": { "type": "object", "additionalProperties": true }
+                      }
+                    },
+                    "requestId": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/conformance/runs": {
       "post": {
         "operationId": "createConformanceRun",
@@ -5835,7 +5972,13 @@
                 "type": "object",
                 "properties": {
                   "network": { "type": "string", "enum": ["stellar:testnet", "stellar:pubnet"] },
-                  "includeReserved": { "type": "boolean", "default": true }
+                  "includeReserved": { "type": "boolean", "default": true },
+                  "mode": {
+                    "type": "string",
+                    "enum": ["local", "live"],
+                    "default": "local",
+                    "description": "Execution mode label: 'local' for simulation/unit checks; 'live' for verified deployed runs."
+                  }
                 }
               }
             }
@@ -5871,6 +6014,10 @@
                     "network",
                     "suite",
                     "status",
+                    "mode",
+                    "commit",
+                    "x402Version",
+                    "x402PackageVersion",
                     "results",
                     "startedAt",
                     "completedAt"
@@ -5880,6 +6027,24 @@
                     "network": { "type": "string", "enum": ["stellar:testnet", "stellar:pubnet"] },
                     "suite": { "type": "string", "enum": ["stellar-x402"] },
                     "status": { "type": "string", "enum": ["passed", "failed"] },
+                    "mode": {
+                      "type": "string",
+                      "enum": ["local", "live"],
+                      "description": "Execution environment mode: 'local' for simulation/unit checks; 'live' for verified deployed runs."
+                    },
+                    "commit": {
+                      "type": "string",
+                      "description": "Source commit SHA of the code running the conformance suite."
+                    },
+                    "x402Version": {
+                      "type": "integer",
+                      "enum": [2],
+                      "description": "x402 protocol specification version."
+                    },
+                    "x402PackageVersion": {
+                      "type": "string",
+                      "description": "Installed @x402/core package version."
+                    },
                     "passedCount": { "type": "integer" },
                     "failedCount": { "type": "integer" },
                     "reservedCount": { "type": "integer" },
@@ -6041,6 +6206,10 @@
                       "network",
                       "suite",
                       "status",
+                      "mode",
+                      "commit",
+                      "x402Version",
+                      "x402PackageVersion",
                       "results",
                       "startedAt",
                       "completedAt"
@@ -6053,6 +6222,24 @@
                       },
                       "suite": { "type": "string", "enum": ["stellar-x402"] },
                       "status": { "type": "string", "enum": ["passed", "failed"] },
+                      "mode": {
+                        "type": "string",
+                        "enum": ["local", "live"],
+                        "description": "Execution environment mode: 'local' for simulation/unit checks; 'live' for verified deployed runs."
+                      },
+                      "commit": {
+                        "type": "string",
+                        "description": "Source commit SHA of the code running the conformance suite."
+                      },
+                      "x402Version": {
+                        "type": "integer",
+                        "enum": [2],
+                        "description": "x402 protocol specification version."
+                      },
+                      "x402PackageVersion": {
+                        "type": "string",
+                        "description": "Installed @x402/core package version."
+                      },
                       "passedCount": { "type": "integer" },
                       "failedCount": { "type": "integer" },
                       "reservedCount": { "type": "integer" },
@@ -6218,6 +6405,10 @@
                     "network",
                     "suite",
                     "status",
+                    "mode",
+                    "commit",
+                    "x402Version",
+                    "x402PackageVersion",
                     "results",
                     "startedAt",
                     "completedAt"
@@ -6227,6 +6418,24 @@
                     "network": { "type": "string", "enum": ["stellar:testnet", "stellar:pubnet"] },
                     "suite": { "type": "string", "enum": ["stellar-x402"] },
                     "status": { "type": "string", "enum": ["passed", "failed"] },
+                    "mode": {
+                      "type": "string",
+                      "enum": ["local", "live"],
+                      "description": "Execution environment mode: 'local' for simulation/unit checks; 'live' for verified deployed runs."
+                    },
+                    "commit": {
+                      "type": "string",
+                      "description": "Source commit SHA of the code running the conformance suite."
+                    },
+                    "x402Version": {
+                      "type": "integer",
+                      "enum": [2],
+                      "description": "x402 protocol specification version."
+                    },
+                    "x402PackageVersion": {
+                      "type": "string",
+                      "description": "Installed @x402/core package version."
+                    },
                     "passedCount": { "type": "integer" },
                     "failedCount": { "type": "integer" },
                     "reservedCount": { "type": "integer" },
@@ -6376,6 +6585,9 @@
   },
   "x-docs-consumption": {
     "source": "lumenbazaar-backend/docs/api/openapi.json",
-    "markdown": "lumenbazaar-backend/docs/api/openapi.md"
+    "markdown": "lumenbazaar-backend/docs/api/openapi.md",
+    "conformance": "lumenbazaar-backend/docs/api/conformance.json",
+    "conformanceMarkdown": "lumenbazaar-backend/docs/api/conformance.md",
+    "checksums": "lumenbazaar-backend/docs/api/checksums.json"
   }
 }

@@ -1,4 +1,4 @@
-import { serviceName } from "@lumenbazaar/shared";
+import { getReleaseCommit, serviceName } from "@lumenbazaar/shared";
 
 type HttpMethod = "get" | "post" | "patch" | "delete";
 type SchemaObject = Record<string, unknown>;
@@ -43,8 +43,17 @@ const readinessCheck: SchemaObject = {
   required: ["status"],
   properties: {
     status: readinessCheckStatus,
-    latencyMs: { type: "integer", minimum: 0, description: "Elapsed probe time in ms. Omitted when status is not_required or not_configured." },
-    reason: { type: "string", description: "Stable, generic reason code. Never includes raw error messages, hostnames, credentials, or stack traces." }
+    latencyMs: {
+      type: "integer",
+      minimum: 0,
+      description:
+        "Elapsed probe time in ms. Omitted when status is not_required or not_configured."
+    },
+    reason: {
+      type: "string",
+      description:
+        "Stable, generic reason code. Never includes raw error messages, hostnames, credentials, or stack traces."
+    }
   }
 };
 
@@ -441,12 +450,43 @@ const settledPaymentSession: SchemaObject = {
 
 const conformanceRun: SchemaObject = {
   type: "object",
-  required: ["id", "network", "suite", "status", "results", "startedAt", "completedAt"],
+  required: [
+    "id",
+    "network",
+    "suite",
+    "status",
+    "mode",
+    "commit",
+    "x402Version",
+    "x402PackageVersion",
+    "results",
+    "startedAt",
+    "completedAt"
+  ],
   properties: {
     id: { type: "string" },
     network: { type: "string", enum: ["stellar:testnet", "stellar:pubnet"] },
     suite: { type: "string", enum: ["stellar-x402"] },
     status: { type: "string", enum: ["passed", "failed"] },
+    mode: {
+      type: "string",
+      enum: ["local", "live"],
+      description:
+        "Execution environment mode: 'local' for simulation/unit checks; 'live' for verified deployed runs."
+    },
+    commit: {
+      type: "string",
+      description: "Source commit SHA of the code running the conformance suite."
+    },
+    x402Version: {
+      type: "integer",
+      enum: [2],
+      description: "x402 protocol specification version."
+    },
+    x402PackageVersion: {
+      type: "string",
+      description: "Installed @x402/core package version."
+    },
     passedCount: { type: "integer" },
     failedCount: { type: "integer" },
     reservedCount: { type: "integer" },
@@ -575,7 +615,8 @@ export const apiRouteContracts: RouteContract[] = [
     method: "get",
     path: "/ready",
     operationId: "getReadiness",
-    summary: "Readiness probe — actively checks all dependencies and returns 503 if any required dependency is unavailable.",
+    summary:
+      "Readiness probe — actively checks all dependencies and returns 503 if any required dependency is unavailable.",
     tags: ["metadata"],
     response: readinessResponse,
     degradedResponse: readinessResponse
@@ -790,8 +831,7 @@ export const apiRouteContracts: RouteContract[] = [
     method: "post",
     path: "/v1/sellers/{sellerId}/api-keys/{keyId}/rotate",
     operationId: "rotateSellerApiKey",
-    summary:
-      "Rotate a seller API key; the previous key stays valid for a bounded overlap window.",
+    summary: "Rotate a seller API key; the previous key stays valid for a bounded overlap window.",
     tags: ["sellers"],
     requestBody: jsonObject,
     requestBodyRequired: false,
@@ -951,7 +991,14 @@ export const apiRouteContracts: RouteContract[] = [
       type: "object",
       properties: {
         network: { type: "string", enum: ["stellar:testnet", "stellar:pubnet"] },
-        includeReserved: { type: "boolean", default: true }
+        includeReserved: { type: "boolean", default: true },
+        mode: {
+          type: "string",
+          enum: ["local", "live"],
+          default: "local",
+          description:
+            "Execution mode label: 'local' for simulation/unit checks; 'live' for verified deployed runs."
+        }
       }
     },
     response: conformanceRun
@@ -979,7 +1026,17 @@ export const apiRouteContracts: RouteContract[] = [
 
 export const apiOpenApiSpec = buildOpenApiSpec();
 
-export function buildOpenApiSpec() {
+export function buildOpenApiSpec(
+  options: {
+    commit?: string;
+    version?: string;
+    x402PackageVersion?: string;
+  } = {}
+) {
+  const commit = options.commit ?? getReleaseCommit();
+  const version = options.version ?? "0.1.0";
+  const x402PackageVersion = options.x402PackageVersion ?? "2.28.0";
+
   const paths: Record<string, Record<string, unknown>> = {};
 
   for (const contract of apiRouteContracts) {
@@ -1053,8 +1110,22 @@ export function buildOpenApiSpec() {
     openapi: "3.1.0",
     info: {
       title: "LumenBazaar Backend API",
-      version: "0.1.0",
+      version,
       description: "Facilitator, seller catalog, discovery, and conformance APIs for LumenBazaar.",
+      "x-release": {
+        commit,
+        version,
+        protocol: "stellar-x402",
+        x402Version: 2,
+        x402PackageVersion
+      },
+      "x-compatibility": {
+        protocol: "x402",
+        x402Version: 2,
+        x402PackageVersion,
+        supportedSchemes: ["exact", "upto"],
+        networks: ["stellar:testnet", "stellar:pubnet"]
+      },
       "x-rate-limiting": {
         description:
           "The API implements distributed rate limiting across all replicas using Redis. Each endpoint scope has different limits per 60-second window.",
@@ -1098,12 +1169,25 @@ export function buildOpenApiSpec() {
     },
     "x-docs-consumption": {
       source: `${serviceName}/docs/api/openapi.json`,
-      markdown: `${serviceName}/docs/api/openapi.md`
+      markdown: `${serviceName}/docs/api/openapi.md`,
+      conformance: `${serviceName}/docs/api/conformance.json`,
+      conformanceMarkdown: `${serviceName}/docs/api/conformance.md`,
+      checksums: `${serviceName}/docs/api/checksums.json`
     }
   };
 }
 
 export function renderOpenApiMarkdown(spec: ReturnType<typeof buildOpenApiSpec> = apiOpenApiSpec) {
+  const releaseInfo = spec.info["x-release"] as
+    | {
+        commit?: string;
+        version?: string;
+        x402Version?: number;
+        x402PackageVersion?: string;
+        protocol?: string;
+      }
+    | undefined;
+
   const lines = [
     "# LumenBazaar Backend API",
     "",
@@ -1111,6 +1195,17 @@ export function renderOpenApiMarkdown(spec: ReturnType<typeof buildOpenApiSpec> 
     "",
     `OpenAPI version: ${spec.openapi}`,
     `API version: ${spec.info.version}`,
+    `Source commit: \`${releaseInfo?.commit ?? "unspecified"}\``,
+    `x402 protocol version: ${releaseInfo?.x402Version ?? 2}`,
+    `x402 package version: \`${releaseInfo?.x402PackageVersion ?? "2.28.0"}\``,
+    "",
+    "## Compatibility & Release",
+    "",
+    `- Source commit: \`${releaseInfo?.commit ?? "unspecified"}\``,
+    `- Protocol version: x402 v${releaseInfo?.x402Version ?? 2}`,
+    `- Core package: \`@x402/core@${releaseInfo?.x402PackageVersion ?? "2.28.0"}\``,
+    `- Supported schemes: \`exact\`, \`upto\``,
+    `- Supported networks: \`stellar:testnet\`, \`stellar:pubnet\``,
     "",
     "## Endpoints",
     "",
@@ -1127,7 +1222,9 @@ export function renderOpenApiMarkdown(spec: ReturnType<typeof buildOpenApiSpec> 
     "## Docs Repo Consumption",
     "",
     "- Import `docs/api/openapi.json` for machine-readable API contracts.",
-    "- Import `docs/api/openapi.md` for a human-readable endpoint summary."
+    "- Import `docs/api/openapi.md` for a human-readable endpoint summary.",
+    "- Import `docs/api/conformance.json` for testnet & pubnet conformance definitions.",
+    "- Import `docs/api/checksums.json` for SHA-256 release artifact checksums."
   );
 
   return `${lines.join("\n")}\n`;
