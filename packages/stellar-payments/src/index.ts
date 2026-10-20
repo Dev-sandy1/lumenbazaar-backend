@@ -14,6 +14,7 @@ export * from "./paymentPersistence.js";
 export * from "./paymentSession.js";
 export * from "./receipt.js";
 export * from "./receiptStore.js";
+export * from "./receiptVerification.js";
 export * from "./reconciliation.js";
 export * from "./prismaPaymentPersistence.js";
 export * from "./settlement.js";

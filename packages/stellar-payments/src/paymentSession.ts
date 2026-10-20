@@ -54,7 +54,7 @@ export const settlePaymentSessionSchema = z.object({
 
 export type CreatePaymentSessionInput = z.output<typeof createPaymentSessionSchema>;
 export type SettlePaymentSessionInput = z.output<typeof settlePaymentSessionSchema>;
-export type UptoPaymentSessionStatus = "open" | "settled";
+export type UptoPaymentSessionStatus = "open" | "settling" | "settled";
 
 export type UptoPaymentSession = {
   assetCode: string;
@@ -95,6 +95,7 @@ export type UptoSessionSettlement = {
 };
 
 export type PaymentSessionStore = {
+  claimSessionForSettlement: (sessionId: string) => Promise<UptoPaymentSession | undefined>;
   createSession: (
     input: Omit<UptoPaymentSession, "id" | "createdAt" | "updatedAt">
   ) => Promise<UptoPaymentSession>;
@@ -102,6 +103,13 @@ export type PaymentSessionStore = {
     input: Omit<UptoSessionSettlement, "id" | "createdAt">
   ) => Promise<UptoSessionSettlement>;
   getSession: (sessionId: string) => Promise<UptoPaymentSession | undefined>;
+  getSessionByContractSessionId: (
+    contractSessionId: string
+  ) => Promise<UptoPaymentSession | undefined>;
+  getSettlement: (sessionId: string) => Promise<UptoSessionSettlement | undefined>;
+  getSettlementByTransactionHash: (
+    transactionHash: string
+  ) => Promise<UptoSessionSettlement | undefined>;
   updateSession: (
     sessionId: string,
     input: Partial<Omit<UptoPaymentSession, "id" | "createdAt">>
@@ -119,6 +127,13 @@ export class InMemoryPaymentSessionStore implements PaymentSessionStore {
   private readonly settlements = new Map<string, UptoSessionSettlement>();
 
   async createSession(input: Omit<UptoPaymentSession, "id" | "createdAt" | "updatedAt">) {
+    const existing = Array.from(this.sessions.values()).find(
+      (s) => s.contractSessionId === input.contractSessionId
+    );
+    if (existing !== undefined) {
+      throw new LumenError("REPLAY_DETECTED", "Payment session already exists.");
+    }
+
     const now = new Date().toISOString();
     const session: UptoPaymentSession = {
       id: `payment_session_${randomUUID().replaceAll("-", "").slice(0, 24)}`,
@@ -132,6 +147,13 @@ export class InMemoryPaymentSessionStore implements PaymentSessionStore {
   }
 
   async createSettlement(input: Omit<UptoSessionSettlement, "id" | "createdAt">) {
+    const existing = Array.from(this.settlements.values()).find(
+      (s) => s.transactionHash === input.transactionHash
+    );
+    if (existing !== undefined) {
+      throw new LumenError("REPLAY_DETECTED", "Payment evidence already exists.");
+    }
+
     const settlement: UptoSessionSettlement = {
       id: `upto_settlement_${randomUUID().replaceAll("-", "").slice(0, 24)}`,
       ...input,
@@ -144,6 +166,34 @@ export class InMemoryPaymentSessionStore implements PaymentSessionStore {
 
   async getSession(sessionId: string) {
     return this.sessions.get(sessionId);
+  }
+
+  async getSessionByContractSessionId(contractSessionId: string) {
+    return Array.from(this.sessions.values()).find(
+      (s) => s.contractSessionId === contractSessionId
+    );
+  }
+
+  async getSettlement(sessionId: string) {
+    return Array.from(this.settlements.values()).find((s) => s.sessionId === sessionId);
+  }
+
+  async getSettlementByTransactionHash(transactionHash: string) {
+    return Array.from(this.settlements.values()).find((s) => s.transactionHash === transactionHash);
+  }
+
+  async claimSessionForSettlement(sessionId: string) {
+    const existing = this.sessions.get(sessionId);
+    if (existing === undefined || existing.status !== "open") {
+      return undefined;
+    }
+    const claimed: UptoPaymentSession = {
+      ...existing,
+      status: "settling",
+      updatedAt: new Date().toISOString()
+    };
+    this.sessions.set(sessionId, claimed);
+    return claimed;
   }
 
   async updateSession(
@@ -242,9 +292,11 @@ export class PaymentSessionService {
     return session;
   }
 
-  async getSession(sessionId: string) {
+  async getSession(sessionIdOrContractSessionId: string) {
     this.assertFeatureEnabled();
-    const session = await this.store.getSession(sessionId);
+    const session =
+      (await this.store.getSession(sessionIdOrContractSessionId)) ??
+      (await this.store.getSessionByContractSessionId(sessionIdOrContractSessionId));
 
     if (session === undefined) {
       throw new LumenError("RESOURCE_NOT_FOUND", "Payment session was not found.");
@@ -253,12 +305,42 @@ export class PaymentSessionService {
     return session;
   }
 
+  async getSettlement(sessionId: string) {
+    this.assertFeatureEnabled();
+    const settlement = await this.store.getSettlement(sessionId);
+    if (settlement === undefined) {
+      throw new LumenError("RESOURCE_NOT_FOUND", "Settlement record was not found.");
+    }
+    return settlement;
+  }
+
+  async getSettlementByTransactionHash(transactionHash: string) {
+    this.assertFeatureEnabled();
+    const settlement = await this.store.getSettlementByTransactionHash(transactionHash);
+    if (settlement === undefined) {
+      throw new LumenError("RESOURCE_NOT_FOUND", "Settlement record was not found.");
+    }
+    return settlement;
+  }
+
   async settleSession(input: unknown) {
     this.assertFeatureEnabled();
     const request = normalizeSettleSessionInput(settlePaymentSessionSchema.parse(input));
     const session = await this.getSession(request.sessionId);
 
-    if (session.status !== "open") {
+    if (session.status === "settled") {
+      if (
+        session.usageHash === request.usageHash &&
+        compareExactAmounts(session.spentAmount, request.amount) === 0
+      ) {
+        const settlement = await this.store.getSettlement(session.id);
+        return {
+          ...session,
+          settlementId: settlement?.id ?? `settlement_${session.id}`,
+          settledAt: settlement?.settledAt ?? session.updatedAt,
+          scheme: "upto" as const
+        };
+      }
       throw new LumenError("REPLAY_DETECTED", "Payment session has already been settled.");
     }
 
@@ -270,53 +352,196 @@ export class PaymentSessionService {
       throw new LumenError("AMOUNT_MISMATCH", "Settlement amount exceeds the session cap.");
     }
 
-    const contractResult = await this.bindings.settleSession({
-      actualAmountStroops: amountToStroops(request.amount),
-      contractId: session.contractId,
-      contractSessionId: session.contractSessionId,
-      network: session.network,
-      usageHash: request.usageHash
-    });
-    const remainingAmount = subtractAmounts(session.capAmount, request.amount);
-    const settledAt = new Date().toISOString();
-    const settlement = await this.store.createSettlement({
-      amount: request.amount,
-      ledger: contractResult.ledger,
-      network: session.network,
-      sessionId: session.id,
-      settledAt,
-      status: "settled",
-      transactionHash: contractResult.transactionHash,
-      usageHash: request.usageHash
-    });
-    const updatedSession = await this.store.updateSession(session.id, {
-      ledger: contractResult.ledger,
-      remainingAmount,
-      spentAmount: request.amount,
-      status: "settled",
-      transactionHash: contractResult.transactionHash,
-      usageHash: request.usageHash
-    });
+    const claimed = await this.store.claimSessionForSettlement(session.id);
+    if (claimed === undefined) {
+      return this.waitForDurableSettlement(session.id, request);
+    }
 
-    await this.auditLogService?.record({
-      action: "payment_session.settle",
-      actorId: updatedSession.sellerId,
-      actorType: "facilitator",
-      targetId: updatedSession.id,
-      targetType: "payment_session",
-      metadata: {
-        ...sessionAuditMetadata(updatedSession),
-        settlementId: settlement.id,
+    return this.executeSettlement(session, request);
+  }
+
+  private async executeSettlement(
+    session: UptoPaymentSession,
+    request: NormalizedSettlePaymentSessionInput
+  ) {
+    try {
+      const contractResult = await this.bindings.settleSession({
+        actualAmountStroops: amountToStroops(request.amount),
+        contractId: session.contractId,
+        contractSessionId: session.contractSessionId,
+        network: session.network,
         usageHash: request.usageHash
-      }
-    });
+      });
+      const remainingAmount = subtractAmounts(session.capAmount, request.amount);
+      const settledAt = new Date().toISOString();
+      const settlement = await this.store.createSettlement({
+        amount: request.amount,
+        ledger: contractResult.ledger,
+        network: session.network,
+        sessionId: session.id,
+        settledAt,
+        status: "settled",
+        transactionHash: contractResult.transactionHash,
+        usageHash: request.usageHash
+      });
+      const updatedSession = await this.store.updateSession(session.id, {
+        ledger: contractResult.ledger,
+        remainingAmount,
+        spentAmount: request.amount,
+        status: "settled",
+        transactionHash: contractResult.transactionHash,
+        usageHash: request.usageHash
+      });
 
-    return {
-      ...updatedSession,
-      settlementId: settlement.id,
-      settledAt,
-      scheme: "upto" as const
-    };
+      await this.auditLogService?.record({
+        action: "payment_session.settle",
+        actorId: updatedSession.sellerId,
+        actorType: "facilitator",
+        targetId: updatedSession.id,
+        targetType: "payment_session",
+        metadata: {
+          ...sessionAuditMetadata(updatedSession),
+          settlementId: settlement.id,
+          usageHash: request.usageHash
+        }
+      });
+
+      return {
+        ...updatedSession,
+        settlementId: settlement.id,
+        settledAt,
+        scheme: "upto" as const
+      };
+    } catch (error) {
+      await this.store.updateSession(session.id, { status: "open" }).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  private async waitForDurableSettlement(
+    sessionId: string,
+    request: NormalizedSettlePaymentSessionInput
+  ) {
+    for (let check = 0; check < 250; check += 1) {
+      const current = await this.store.getSession(sessionId);
+      if (current === undefined) {
+        break;
+      }
+      if (current.status === "settled") {
+        if (
+          current.usageHash === request.usageHash &&
+          compareExactAmounts(current.spentAmount, request.amount) === 0
+        ) {
+          const settlement = await this.store.getSettlement(current.id);
+          return {
+            ...current,
+            settlementId: settlement?.id ?? `settlement_${current.id}`,
+            settledAt: settlement?.settledAt ?? current.updatedAt,
+            scheme: "upto" as const
+          };
+        }
+        throw new LumenError("REPLAY_DETECTED", "Payment session has already been settled.");
+      }
+      if (current.status === "open") {
+        const retryClaim = await this.store.claimSessionForSettlement(sessionId);
+        if (retryClaim !== undefined) {
+          return this.executeSettlement(retryClaim, request);
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    throw new LumenError("SETTLEMENT_FAILED", "Settlement is already in progress.", {
+      statusCode: 409,
+      details: { status: "settling" }
+    });
+  }
+
+  async reconcileSession(sessionIdOrContractSessionId: string): Promise<UptoPaymentSession> {
+    this.assertFeatureEnabled();
+    const session = await this.getSession(sessionIdOrContractSessionId);
+
+    if (this.bindings.getSessionState === undefined) {
+      return session;
+    }
+
+    const onChainState = await this.bindings.getSessionState(
+      session.contractId,
+      session.contractSessionId
+    );
+
+    if (onChainState === undefined) {
+      return session;
+    }
+
+    if (session.status !== "settled" && onChainState.status === "settled") {
+      const settledAt = new Date().toISOString();
+      const txHash =
+        onChainState.transactionHash ??
+        session.transactionHash ??
+        `reconciled_${session.contractSessionId}`;
+      const ledger = onChainState.ledger ?? session.ledger ?? 1;
+
+      let settlement = await this.store.getSettlement(session.id);
+      if (settlement === undefined) {
+        settlement = await this.store.createSettlement({
+          amount: session.spentAmount !== "0" ? session.spentAmount : session.capAmount,
+          ledger,
+          network: session.network,
+          sessionId: session.id,
+          settledAt,
+          status: "settled",
+          transactionHash: txHash,
+          usageHash: session.usageHash ?? "reconciled"
+        });
+      }
+
+      const updated = await this.store.updateSession(session.id, {
+        ledger,
+        status: "settled",
+        transactionHash: txHash,
+        remainingAmount:
+          session.remainingAmount === session.capAmount ? "0" : session.remainingAmount,
+        spentAmount: session.spentAmount === "0" ? session.capAmount : session.spentAmount
+      });
+
+      await this.auditLogService?.record({
+        action: "payment_session.reconcile",
+        actorId: updated.sellerId,
+        actorType: "facilitator",
+        targetId: updated.id,
+        targetType: "payment_session",
+        metadata: {
+          ...sessionAuditMetadata(updated),
+          reconciledState: "settled",
+          transactionHash: txHash
+        }
+      });
+
+      return updated;
+    }
+
+    if (session.status === "settling" && onChainState.status === "open") {
+      const updated = await this.store.updateSession(session.id, {
+        status: "open"
+      });
+
+      await this.auditLogService?.record({
+        action: "payment_session.reconcile",
+        actorId: updated.sellerId,
+        actorType: "facilitator",
+        targetId: updated.id,
+        targetType: "payment_session",
+        metadata: {
+          ...sessionAuditMetadata(updated),
+          reconciledState: "open",
+          previousStatus: "settling"
+        }
+      });
+
+      return updated;
+    }
+
+    return session;
   }
 
   private assertFeatureEnabled() {

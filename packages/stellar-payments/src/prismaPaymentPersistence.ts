@@ -27,10 +27,20 @@ import {
   type ReceiptStatusChangeListener
 } from "./paymentStatePersistence.js";
 import { receiptEvidenceHash } from "./receipt.js";
+import {
+  type PaymentSessionStore,
+  type UptoPaymentSession,
+  type UptoPaymentSessionStatus,
+  type UptoSessionSettlement
+} from "./paymentSession.js";
 import { type CreateReceiptInput, type ReceiptStore } from "./receiptStore.js";
 import { type CreateSettlementInput, type SettlementStore } from "./settlementStore.js";
 
 type PaymentDatabaseClient = Pick<PrismaClient, "paymentAttempt" | "receipt" | "settlement">;
+export type PaymentSessionDatabaseClient = Pick<
+  PrismaClient,
+  "paymentSession" | "uptoSessionSettlement"
+>;
 
 export class PrismaPaymentAttemptStore implements PaymentAttemptStore {
   constructor(private readonly db: PaymentDatabaseClient) {}
@@ -400,4 +410,199 @@ function isUniqueViolation(error: unknown) {
 
 function isNotFound(error: unknown) {
   return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025";
+}
+
+export class PrismaPaymentSessionStore implements PaymentSessionStore {
+  constructor(private readonly db: PaymentSessionDatabaseClient) {}
+
+  async createSession(
+    input: Omit<UptoPaymentSession, "id" | "createdAt" | "updatedAt">
+  ): Promise<UptoPaymentSession> {
+    try {
+      const row = await this.db.paymentSession.create({
+        data: {
+          resourceId: input.resourceId,
+          sellerId: input.sellerId,
+          network: input.network,
+          buyer: input.buyer,
+          payTo: input.payTo,
+          assetCode: input.assetCode,
+          assetIssuer: input.assetIssuer,
+          assetContractId: input.assetContractId,
+          capAmount: input.capAmount,
+          spentAmount: input.spentAmount,
+          remainingAmount: input.remainingAmount,
+          contractId: input.contractId,
+          contractSessionId: input.contractSessionId,
+          resourceHash: input.resourceHash,
+          expiresAtLedger: input.expiresAtLedger,
+          status: input.status,
+          transactionHash: input.transactionHash,
+          ledger: input.ledger,
+          usageHash: input.usageHash
+        }
+      });
+      return mapPaymentSession(row);
+    } catch (error) {
+      throwReplayOr(error);
+    }
+  }
+
+  async createSettlement(
+    input: Omit<UptoSessionSettlement, "id" | "createdAt">
+  ): Promise<UptoSessionSettlement> {
+    try {
+      const row = await this.db.uptoSessionSettlement.create({
+        data: {
+          sessionId: input.sessionId,
+          network: input.network,
+          amount: input.amount,
+          transactionHash: input.transactionHash,
+          ledger: input.ledger,
+          usageHash: input.usageHash,
+          status: input.status,
+          settledAt: new Date(input.settledAt)
+        }
+      });
+      return mapUptoSessionSettlement(row);
+    } catch (error) {
+      throwReplayOr(error);
+    }
+  }
+
+  async getSession(sessionId: string): Promise<UptoPaymentSession | undefined> {
+    const row = await this.db.paymentSession.findUnique({
+      where: { id: sessionId }
+    });
+    return row === null ? undefined : mapPaymentSession(row);
+  }
+
+  async getSessionByContractSessionId(
+    contractSessionId: string
+  ): Promise<UptoPaymentSession | undefined> {
+    const row = await this.db.paymentSession.findUnique({
+      where: { contractSessionId }
+    });
+    return row === null ? undefined : mapPaymentSession(row);
+  }
+
+  async getSettlement(sessionId: string): Promise<UptoSessionSettlement | undefined> {
+    const row = await this.db.uptoSessionSettlement.findFirst({
+      where: { sessionId },
+      orderBy: { createdAt: "desc" }
+    });
+    return row === null ? undefined : mapUptoSessionSettlement(row);
+  }
+
+  async getSettlementByTransactionHash(
+    transactionHash: string
+  ): Promise<UptoSessionSettlement | undefined> {
+    const row = await this.db.uptoSessionSettlement.findUnique({
+      where: { transactionHash }
+    });
+    return row === null ? undefined : mapUptoSessionSettlement(row);
+  }
+
+  async claimSessionForSettlement(sessionId: string): Promise<UptoPaymentSession | undefined> {
+    const claimed = await this.db.paymentSession.updateMany({
+      where: { id: sessionId, status: "open" },
+      data: { status: "settling" }
+    });
+    if (claimed.count === 0) {
+      return undefined;
+    }
+    return this.getSession(sessionId);
+  }
+
+  async updateSession(
+    sessionId: string,
+    input: Partial<Omit<UptoPaymentSession, "id" | "createdAt">>
+  ): Promise<UptoPaymentSession> {
+    try {
+      const row = await this.db.paymentSession.update({
+        where: { id: sessionId },
+        data: {
+          ...(input.resourceId !== undefined ? { resourceId: input.resourceId } : {}),
+          ...(input.sellerId !== undefined ? { sellerId: input.sellerId } : {}),
+          ...(input.network !== undefined ? { network: input.network } : {}),
+          ...(input.buyer !== undefined ? { buyer: input.buyer } : {}),
+          ...(input.payTo !== undefined ? { payTo: input.payTo } : {}),
+          ...(input.assetCode !== undefined ? { assetCode: input.assetCode } : {}),
+          ...(input.assetIssuer !== undefined ? { assetIssuer: input.assetIssuer } : {}),
+          ...(input.assetContractId !== undefined
+            ? { assetContractId: input.assetContractId }
+            : {}),
+          ...(input.capAmount !== undefined ? { capAmount: input.capAmount } : {}),
+          ...(input.spentAmount !== undefined ? { spentAmount: input.spentAmount } : {}),
+          ...(input.remainingAmount !== undefined
+            ? { remainingAmount: input.remainingAmount }
+            : {}),
+          ...(input.contractId !== undefined ? { contractId: input.contractId } : {}),
+          ...(input.contractSessionId !== undefined
+            ? { contractSessionId: input.contractSessionId }
+            : {}),
+          ...(input.resourceHash !== undefined ? { resourceHash: input.resourceHash } : {}),
+          ...(input.expiresAtLedger !== undefined
+            ? { expiresAtLedger: input.expiresAtLedger }
+            : {}),
+          ...(input.status !== undefined ? { status: input.status } : {}),
+          ...(input.transactionHash !== undefined
+            ? { transactionHash: input.transactionHash }
+            : {}),
+          ...(input.ledger !== undefined ? { ledger: input.ledger } : {}),
+          ...(input.usageHash !== undefined ? { usageHash: input.usageHash } : {})
+        }
+      });
+      return mapPaymentSession(row);
+    } catch (error) {
+      if (isNotFound(error)) {
+        throw new LumenError("RESOURCE_NOT_FOUND", "Payment session was not found.");
+      }
+      throwReplayOr(error);
+    }
+  }
+}
+
+function mapPaymentSession(row: Prisma.PaymentSessionGetPayload<object>): UptoPaymentSession {
+  return {
+    id: row.id,
+    resourceId: row.resourceId,
+    sellerId: row.sellerId,
+    network: requireNetwork(row.network),
+    buyer: row.buyer,
+    payTo: row.payTo,
+    assetCode: row.assetCode,
+    assetIssuer: row.assetIssuer,
+    assetContractId: row.assetContractId,
+    capAmount: row.capAmount.toString(),
+    spentAmount: row.spentAmount.toString(),
+    remainingAmount: row.remainingAmount.toString(),
+    contractId: row.contractId,
+    contractSessionId: row.contractSessionId,
+    resourceHash: row.resourceHash,
+    expiresAtLedger: row.expiresAtLedger,
+    status: row.status as UptoPaymentSessionStatus,
+    transactionHash: row.transactionHash,
+    ledger: row.ledger,
+    usageHash: row.usageHash,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString()
+  };
+}
+
+function mapUptoSessionSettlement(
+  row: Prisma.UptoSessionSettlementGetPayload<object>
+): UptoSessionSettlement {
+  return {
+    id: row.id,
+    sessionId: row.sessionId,
+    network: requireNetwork(row.network),
+    amount: row.amount.toString(),
+    transactionHash: row.transactionHash,
+    ledger: row.ledger,
+    usageHash: row.usageHash,
+    status: "settled",
+    settledAt: row.settledAt.toISOString(),
+    createdAt: row.createdAt.toISOString()
+  };
 }

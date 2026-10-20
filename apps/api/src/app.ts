@@ -12,6 +12,7 @@ import {
 } from "@lumenbazaar/shared";
 import {
   PaymentSessionService,
+  type PaymentSessionStore,
   PaymentVerificationService,
   ReceiptService,
   SettlementService,
@@ -70,6 +71,7 @@ export type BuildApiAppOptions = {
   config?: AppConfig;
   logger?: boolean;
   paymentSessionService?: PaymentSessionService;
+  paymentSessionStore?: PaymentSessionStore;
   verificationService?: PaymentVerificationService;
   settlementService?: SettlementService;
   receiptService?: ReceiptService;
@@ -230,7 +232,11 @@ export function buildApiApp(options: BuildApiAppOptions = {}) {
     });
   const routeReceiptService = options.receiptService ?? settlementService.getReceiptService();
   const paymentSessionService =
-    options.paymentSessionService ?? new PaymentSessionService(config, { auditLogService });
+    options.paymentSessionService ??
+    new PaymentSessionService(config, {
+      auditLogService,
+      store: options.paymentSessionStore ?? paymentPersistence.paymentSessionStore
+    });
   const catalogValidationService =
     options.catalogValidationService ?? new CatalogValidationService(config, sellerService);
   const catalogService =
