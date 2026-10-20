@@ -24,6 +24,10 @@ export function resolveTargetCommit(checkOnly: boolean, existingCommit?: string)
     return process.argv[commitArgIndex + 1];
   }
 
+  if (checkOnly && existingCommit && existingCommit !== "unspecified") {
+    return existingCommit;
+  }
+
   const envCommit =
     process.env.RELEASE_COMMIT ??
     process.env.GIT_COMMIT ??
@@ -31,10 +35,6 @@ export function resolveTargetCommit(checkOnly: boolean, existingCommit?: string)
     process.env.RENDER_GIT_COMMIT;
   if (envCommit) {
     return envCommit;
-  }
-
-  if (checkOnly && existingCommit && existingCommit !== "unspecified") {
-    return existingCommit;
   }
 
   try {
