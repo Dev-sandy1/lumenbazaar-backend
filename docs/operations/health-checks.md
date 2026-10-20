@@ -155,6 +155,40 @@ Errors are always mapped to stable reason codes: `dependency_check_failed` or `p
 
 ---
 
+## Runbook: Testnet Deployment Gates and Rollback
+
+This section ties the health endpoints into the executable testnet deployment checklist in `docs/deployment/testnet.md`. The checklist is the source of truth for ordering; this section records the health-check evidence expected at each gate.
+
+### Gate ordering
+
+1. **Migrations** — apply migrations in order and confirm the `migrations` probe reports `ready` on `/ready`.
+2. **Readiness** — `/ready` returns 200 with all required dependencies `ready` or `not_required`.
+3. **Smoke** — run the smoke suite against the deployed instance.
+4. **Capability advertising** — only after readiness and smoke gates pass may the deployment advertise capabilities. The `/ready` `capabilities` object must reflect the actually enabled adapters; unsupported network and payment capabilities must remain `false` and fail closed.
+
+### Evidence capture
+
+At each gate, capture and attach to the deployment record:
+
+- The `/ready` response body (redacted as described above) with the deploy commit SHA.
+- The `/health` response body for the running process.
+- Smoke suite output and exit code.
+- The applied migration names and order.
+- The advertised capabilities object and the configured adapter flags.
+
+Never capture or commit credentials, seed phrases, private keys, signed private payloads, or production records. Use synthetic or explicitly public testnet data only.
+
+### Rollback and health gates
+
+1. Roll back the API, worker, and MCP to the previous image deferred in the checklist.
+2. Confirm `/health` returns 200 for the rolled-back process.
+3. Confirm `/ready` returns 200 and that the `migrations` probe still reports `ready` for the rolled-back schema.
+4. Re-run the smoke suite and attach the output to the deployment record.
+5. Preserve idempotency and payment evidence: do not delete or mutate idempotency keys or payment evidence records during rollback. Rollback must not recreate or replay payments.
+6. Restore capability advertising to the previous known-good state only after readiness and smoke gates pass again.
+
+---
+
 ## Migrations
 
 Database schema migrations are not affected by this feature. The migrations probe is a **read-only check** against `_prisma_migrations` and does not modify the schema.

@@ -9,7 +9,27 @@ export type DeploymentCheckOptions = {
   envFile?: string;
 };
 
+export type DeploymentCheckStep = {
+  command: string;
+  description: string;
+  evidence: string;
+  name: string;
+  rollbackPoint: string;
+};
+
+export type DeploymentRunbook = {
+  capabilityAdvertisingGate: string;
+  migrationOrdering: string[];
+  rollback: {
+    idempotency: string;
+    paymentEvidence: string;
+    steps: string[];
+  };
+  steps: DeploymentCheckStep[];
+};
+
 export type DeploymentCheckResult = {
+  runbook: DeploymentRunbook;
   endpoints: {
     api: {
       health: string;
@@ -167,6 +187,7 @@ export function validateTestnetDeploymentEnv(
   };
 
   return {
+    runbook: buildDeploymentRunbook(),
     endpoints: {
       api: {
         health: `${apiBaseUrl}/health`,
@@ -188,6 +209,70 @@ export function validateTestnetDeploymentEnv(
     errors,
     ok: errors.length === 0,
     warnings
+  };
+}
+
+export function buildDeploymentRunbook(): DeploymentRunbook {
+  return {
+    capabilityAdvertisingGate:
+      "Only advertise payment and network capabilities after readiness and smoke gates pass; keep unsupported capabilities fail closed and labeled.",
+    migrationOrdering: [
+      "1. Take a database snapshot and record its identifier as rollback evidence.",
+      "2. Run migrations in ascending order with pnpm db:migrate (never out of order).",
+      "3. Verify migration status matches the expected head before starting API, worker, or MCP.",
+      "4. If a migration fails, stop and restore the snapshot before retrying."
+    ],
+    rollback: {
+      idempotency:
+        "Preserve idempotency keys and dedupe records across rollback; never delete or reuse idempotency state.",
+      paymentEvidence:
+        "Retain payment intents, settlement records, and facilitator receipts as immutable evidence during rollback.",
+      steps: [
+        "1. Stop capability advertising by disabling payment and network features.",
+        "2. Drain worker queues and stop API and MCP processes.",
+        "3. Restore the recorded database snapshot if migrations are implicated.",
+        "4. Redeploy the previous known-good API, worker, and MCP versions.",
+        "5. Re-run readiness and smoke gates before re-enabling capabilities.",
+        "6. Capture logs, snapshot identifiers, and payment evidence references."
+      ]
+    },
+    steps: [
+      {
+        command: "pnpm db:migrate",
+        description: "Apply database migrations in ascending order.",
+        evidence: "Migration output and resulting schema version.",
+        name: "database-migration",
+        rollbackPoint: "Pre-migration database snapshot identifier."
+      },
+      {
+        command: "pnpm --filter @lumen/api start",
+        description: "Start the API service.",
+        evidence: "API startup logs and process identifier.",
+        name: "api",
+        rollbackPoint: "Previous API image tag."
+      },
+      {
+        command: "pnpm --filter @lumen/worker start",
+        description: "Start the worker service.",
+        evidence: "Worker startup logs and queue drain status.",
+        name: "worker",
+        rollbackPoint: "Previous worker image tag."
+      },
+      {
+        command: "pnpm --filter @lumen/mcp start",
+        description: "Start the MCP service.",
+        evidence: "MCP startup logs and process identifier.",
+        name: "mcp",
+        rollbackPoint: "Previous MCP image tag."
+      },
+      {
+        command: "pnpm deploy:testnet:check --env-file .env.testnet",
+        description: "Run readiness and smoke gates before advertising capabilities.",
+        evidence: "Deployment check JSON output with ok=true.",
+        name: "readiness-smoke-gate",
+        rollbackPoint: "Last passing deployment check output."
+      }
+    ]
   };
 }
 

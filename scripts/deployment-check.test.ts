@@ -140,4 +140,13 @@ describe("testnet deployment check", () => {
       envFile: ".env.testnet"
     });
   });
+
+  it("exposes rollback and evidence gates for the runbook", () => {
+    const result = validateTestnetDeploymentEnv(validEnv, { allowPlaceholders: false });
+
+    expect(result.ok).toBe(true);
+    expect(result.endpoints.api.readiness).to.typeof("string");
+    expect(result.endpoints.mcp.readiness).to.typeof("string");
+    expect(JSON.stringify(result)).not.toMatch(/FACILITATOR_SIGNING_KEY=/);
+  });
 });
