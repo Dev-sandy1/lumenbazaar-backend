@@ -14,9 +14,13 @@ COPY packages ./packages
 COPY prisma ./prisma
 COPY scripts ./scripts
 
+# Install all dependencies (including dev) so typecheck and migration tooling are available during build.
 RUN pnpm install --frozen-lockfile
+
 RUN pnpm prisma:generate && pnpm typecheck
 
 ENV NODE_ENV=production
 
+# Default runtime is the API. Operators override the command for worker, MCP, migrations,
+# and health gates as described in docs/deployment/testnet.md.
 CMD ["pnpm", "start:api"]
