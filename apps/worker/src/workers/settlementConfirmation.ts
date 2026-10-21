@@ -2,10 +2,12 @@ import { createHash, randomUUID } from "node:crypto";
 
 import { type PrismaClient } from "@prisma/client";
 import * as StellarSdk from "@stellar/stellar-sdk";
-import { type Job } from "bullmq";
+import { type Job, type Queue } from "bullmq";
 
 import { type AppConfig, getPrismaClient, redactSensitiveText } from "@lumenbazaar/shared";
 import { createHorizonClient } from "@lumenbazaar/stellar-payments";
+
+import { enqueueSettlementConfirmation } from "../jobQueue.js";
 
 export type SettlementConfirmationJobData = {
   correlationId?: string;
@@ -49,8 +51,25 @@ export async function handleSettlementConfirmation(
     throw new Error(`Payment attempt not found: ${job.data.paymentAttemptId}`);
   }
   const settlement = attempt.settlement;
-  if (settlement?.status === "confirmed" && attempt.receipt?.status === "finalized") {
-    await job.log(`Settlement ${settlement.id} is already final.`);
+
+  // Duplicate / already final jobs are harmless
+  if (
+    (settlement?.status === "confirmed" && attempt.receipt?.status === "finalized") ||
+    settlement?.reconciliationState === "reconciled" ||
+    attempt.status === "confirmed"
+  ) {
+    await job.log(`Settlement ${settlement?.id ?? attempt.id} is already final.`);
+    return;
+  }
+
+  // Already marked for manual review / failed jobs are harmless
+  if (
+    settlement?.reconciliationState === "needs_review" ||
+    (settlement?.status === "failed" && attempt.status === "failed")
+  ) {
+    await job.log(
+      `Settlement ${settlement?.id ?? attempt.id} is already marked for manual review.`
+    );
     return;
   }
 
@@ -81,9 +100,58 @@ export async function handleSettlementConfirmation(
     return;
   }
 
-  const state = await statusClient.getTransactionState(transactionHash, settlement.network);
+  let state: ChainTransactionState;
+  try {
+    state = await statusClient.getTransactionState(transactionHash, settlement.network);
+  } catch (error) {
+    if (isTimeoutError(error)) {
+      state = {
+        status: "pending",
+        reason: `Transaction status check timed out: ${redactSensitiveText((error as Error).message ?? "timeout")}`
+      };
+    } else if (isNotFound(error)) {
+      state = {
+        status: "pending",
+        reason: "Transaction is not yet visible on Horizon."
+      };
+    } else if (isMalformedError(error)) {
+      state = {
+        status: "failed",
+        reason: `Provider returned a malformed response: ${redactSensitiveText((error as Error).message ?? "malformed")}`
+      };
+    } else {
+      throw error;
+    }
+  }
+
+  // Guard against malformed state objects returned from status client
+  if (
+    state === null ||
+    typeof state !== "object" ||
+    !("status" in state) ||
+    (state.status === "confirmed" &&
+      (typeof state.ledger !== "number" || !Number.isInteger(state.ledger) || state.ledger <= 0))
+  ) {
+    const reason =
+      "Provider returned a malformed transaction state: missing valid ledger or status.";
+    await recordNeedsReview(db, attempt.id, settlement.id, reason);
+    await job.log(`Settlement ${settlement.id} requires manual review: ${reason}`);
+    return;
+  }
+
   if (state.status === "pending") {
     const stateReason = redactSensitiveText(state.reason);
+    const isExhausted = job.opts?.attempts !== undefined && job.attemptsMade >= job.opts.attempts;
+
+    if (isExhausted) {
+      const exhaustedReason = `Reconciliation retries exhausted: ${stateReason}`;
+      await recordNeedsReview(db, attempt.id, settlement.id, exhaustedReason);
+      await job.log(
+        `Settlement ${settlement.id} retries exhausted, recorded for manual review: ${exhaustedReason}`
+      );
+      throw new ReconciliationPendingError(exhaustedReason);
+    }
+
     await db.settlement.update({
       where: { id: settlement.id },
       data: {
@@ -95,6 +163,7 @@ export async function handleSettlementConfirmation(
     });
     throw new ReconciliationPendingError(stateReason);
   }
+
   if (state.status === "failed") {
     const reason = redactSensitiveText(state.reason);
     await recordNeedsReview(db, attempt.id, settlement.id, reason);
@@ -188,17 +257,92 @@ export async function markReconciliationDeadLetter(
   data: SettlementConfirmationJobData,
   reason: string
 ) {
-  if (data.settlementId !== undefined) {
-    await recordNeedsReview(db, data.paymentAttemptId, data.settlementId, reason);
+  const settlementId =
+    data.settlementId ??
+    (
+      await db.settlement.findUnique({
+        where: { paymentAttemptId: data.paymentAttemptId },
+        select: { id: true }
+      })
+    )?.id;
+
+  if (settlementId !== undefined) {
+    await recordNeedsReview(db, data.paymentAttemptId, settlementId, reason);
     return;
   }
-  await db.paymentAttempt.updateMany({
-    where: { id: data.paymentAttemptId, status: "settling" },
-    data: { status: "failed", failureCode: "SETTLEMENT_FAILED", failureReason: reason }
+
+  const attempt = await db.paymentAttempt.findUnique({
+    where: { id: data.paymentAttemptId },
+    select: { id: true, correlationId: true }
   });
+
+  if (attempt !== null) {
+    await db.$transaction([
+      db.paymentAttempt.update({
+        where: { id: data.paymentAttemptId },
+        data: { status: "failed", failureCode: "SETTLEMENT_FAILED", failureReason: reason }
+      }),
+      db.auditLog.create({
+        data: {
+          correlationId: attempt.correlationId,
+          actorType: "system",
+          action: "settlement.reconciliation.needs_review",
+          targetType: "payment_attempt",
+          targetId: attempt.id,
+          metadata: { reason }
+        }
+      })
+    ]);
+  }
 }
 
-function createTransactionStatusClient(config: AppConfig): TransactionStatusClient {
+export async function resumePendingSettlements(
+  db: PrismaClient,
+  queue: Queue,
+  options: { take?: number } = {}
+): Promise<number> {
+  const attempts = await db.paymentAttempt.findMany({
+    where: {
+      OR: [
+        { status: "settling", settlement: null },
+        {
+          settlement: {
+            is: {
+              transactionHash: { not: null },
+              reconciliationState: { notIn: ["reconciled", "needs_review"] },
+              OR: [
+                { reconciliationState: "pending" },
+                { status: { in: ["pending", "submitted", "timed_out"] } }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    include: { settlement: true },
+    take: options.take ?? 1000
+  });
+
+  for (const attempt of attempts) {
+    await enqueueSettlementConfirmation(queue, {
+      correlationId: attempt.correlationId,
+      paymentAttemptId: attempt.id,
+      network: attempt.network,
+      ...(attempt.settlement === null
+        ? {}
+        : {
+            settlementId: attempt.settlement.id,
+            ...(attempt.settlement.transactionHash === null
+              ? {}
+              : { transactionHash: attempt.settlement.transactionHash })
+          })
+    });
+  }
+
+  return attempts.length;
+}
+
+export function createTransactionStatusClient(config: AppConfig): TransactionStatusClient {
   return {
     async getTransactionState(transactionHash, network) {
       const horizonRef = createHorizonClient(config, network);
@@ -207,13 +351,37 @@ function createTransactionStatusClient(config: AppConfig): TransactionStatusClie
       });
       try {
         const transaction = await server.transactions().transaction(transactionHash).call();
+        if (
+          transaction === null ||
+          typeof transaction !== "object" ||
+          typeof transaction.successful !== "boolean"
+        ) {
+          return {
+            status: "failed",
+            reason: "Provider returned a malformed transaction response: invalid structure."
+          };
+        }
         if (transaction.successful === false) {
           return { status: "failed", reason: "Stellar recorded the transaction as failed." };
         }
-        return { status: "confirmed", ledger: transaction.ledger_attr };
+        const ledger = transaction.ledger_attr;
+        if (typeof ledger !== "number" || !Number.isInteger(ledger) || ledger <= 0) {
+          return {
+            status: "failed",
+            reason:
+              "Provider returned a malformed transaction response: missing or invalid ledger attribute."
+          };
+        }
+        return { status: "confirmed", ledger };
       } catch (error) {
         if (isNotFound(error)) {
           return { status: "pending", reason: "Transaction is not yet visible on Horizon." };
+        }
+        if (isTimeoutError(error)) {
+          return { status: "pending", reason: "Horizon provider request timed out." };
+        }
+        if (isMalformedError(error)) {
+          return { status: "failed", reason: "Provider returned a malformed response." };
         }
         throw error;
       }
@@ -227,10 +395,13 @@ async function recordNeedsReview(
   settlementId: string,
   reason: string
 ) {
-  const attempt = await db.paymentAttempt.findUniqueOrThrow({
+  const attempt = await db.paymentAttempt.findUnique({
     where: { id: paymentAttemptId },
     select: { correlationId: true }
   });
+  if (attempt === null) {
+    return;
+  }
   await db.$transaction([
     db.settlement.update({
       where: { id: settlementId },
@@ -259,10 +430,52 @@ async function recordNeedsReview(
   ]);
 }
 
-function isNotFound(error: unknown) {
+export function isNotFound(error: unknown) {
   if (typeof error !== "object" || error === null) {
     return false;
   }
   const candidate = error as { response?: { status?: number }; status?: number };
   return candidate.status === 404 || candidate.response?.status === 404;
+}
+
+export function isTimeoutError(error: unknown) {
+  if (typeof error !== "object" || error === null) {
+    return false;
+  }
+  const candidate = error as {
+    response?: { status?: number };
+    status?: number;
+    code?: string;
+    name?: string;
+    message?: string;
+  };
+  if (candidate.status === 408 || candidate.status === 504) return true;
+  if (candidate.response?.status === 408 || candidate.response?.status === 504) return true;
+  if (
+    candidate.code === "ETIMEDOUT" ||
+    candidate.code === "ECONNABORTED" ||
+    candidate.code === "ESOCKETTIMEDOUT"
+  ) {
+    return true;
+  }
+  if (candidate.name === "TimeoutError" || candidate.name === "AbortError") return true;
+  if (typeof candidate.message === "string" && /timeout|timed out|abort/i.test(candidate.message)) {
+    return true;
+  }
+  return false;
+}
+
+export function isMalformedError(error: unknown) {
+  if (typeof error !== "object" || error === null) {
+    return false;
+  }
+  const candidate = error as { name?: string; message?: string };
+  if (candidate.name === "SyntaxError") return true;
+  if (
+    typeof candidate.message === "string" &&
+    /malformed|unexpected token|invalid json|bad response/i.test(candidate.message)
+  ) {
+    return true;
+  }
+  return false;
 }
