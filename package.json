@@ -24,6 +24,7 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:migrate:deploy": "prisma migrate deploy",
     "prisma:validate": "node scripts/prisma.mjs validate",
+    "payments:persistence:test": "vitest run --passWithNoTests prismaPaymentPersistence.integration.test.ts settlementConcurrency.integration.test.ts",
     "deploy:testnet:check": "tsx scripts/deployment-check.ts --env-file config/testnet.release.env",
     "deploy:testnet:check:example": "tsx scripts/deployment-check.ts --env-file .env.testnet.example --allow-placeholders",
     "deploy:testnet:probe": "tsx scripts/testnet-probe.ts --manifest docs/deployment/testnet-endpoints.json",
