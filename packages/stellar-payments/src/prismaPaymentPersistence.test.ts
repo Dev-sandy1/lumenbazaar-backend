@@ -17,7 +17,7 @@ type AttemptRow = {
   network: string;
   assetCode: string;
   assetIssuer: string;
-  amount: string;
+  amount: Prisma.Decimal;
   payTo: string;
   status: string;
   failureCode: string | null;
@@ -61,7 +61,8 @@ class FakePaymentDatabase {
         expiresAtLedger: null,
         createdAt: now,
         updatedAt: now,
-        ...data
+        ...data,
+        amount: numericColumn(data.amount)
       } as unknown as AttemptRow;
       this.attempts.set(row.id, row);
       return row;
@@ -111,6 +112,11 @@ class FakePaymentDatabase {
   }
 }
 
+function numericColumn(value: unknown) {
+  const [whole = "0", fraction = ""] = String(value).split(".");
+  return new Prisma.Decimal(`${whole}.${fraction.padEnd(7, "0")}`);
+}
+
 function uniqueViolation(constraint: string) {
   return new Prisma.PrismaClientKnownRequestError(
     `Unique constraint failed on the constraint: \`${constraint}\``,
@@ -138,7 +144,7 @@ function attemptInput(overrides: Partial<CreatePaymentAttemptInput> = {}) {
     network,
     assetCode: "USDC",
     assetIssuer: issuer,
-    amount: "0.0500000",
+    amount: "500000",
     payTo: issuer,
     ...overrides
   };
@@ -237,5 +243,25 @@ describe("PrismaPaymentAttemptStore", () => {
       store.updatePaymentAttempt("attempt_missing", { status: "settling" })
     ).rejects.toMatchObject({ code: "INVALID_PAYMENT_PAYLOAD" });
     await expect(store.claimSettlement("attempt_missing")).resolves.toBeUndefined();
+  });
+
+  it("round-trips atomic amounts through the numeric column scale", async () => {
+    const { store } = createStore();
+    const attempt = await store.createVerifiedAttempt(attemptInput());
+
+    expect(attempt.amount).toBe("500000");
+    await expect(store.getPaymentAttempt(attempt.id)).resolves.toMatchObject({
+      amount: "500000"
+    });
+    await expect(store.findPaymentAttemptByHash("payment_hash_a")).resolves.toMatchObject({
+      amount: "500000"
+    });
+  });
+
+  it("canonicalizes stored amounts that carry the numeric column scale", async () => {
+    const { store } = createStore();
+    const attempt = await store.createVerifiedAttempt(attemptInput({ amount: "0.0500000" }));
+
+    expect(attempt.amount).toBe("0.05");
   });
 });

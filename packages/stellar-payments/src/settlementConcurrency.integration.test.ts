@@ -103,6 +103,7 @@ describePostgres("multi-process settlement concurrency", () => {
 
     expect(concurrent).toEqual(first);
     expect(retry).toEqual(first);
+    expect(first!.amount).toBe("500000");
     expect(settleExact).toHaveBeenCalledTimes(1);
     await expect(firstClient.settlement.count()).resolves.toBe(1);
     await expect(firstClient.receipt.count()).resolves.toBe(1);
@@ -117,7 +118,7 @@ describePostgres("multi-process settlement concurrency", () => {
       network: "stellar:testnet",
       assetCode: "USDC",
       assetIssuer: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
-      amount: "0.0500000",
+      amount: "500000",
       payTo: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"
     });
     await expect(firstStore.claimSettlement(attempt.id)).resolves.toMatchObject({

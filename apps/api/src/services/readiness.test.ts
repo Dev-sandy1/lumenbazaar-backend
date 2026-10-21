@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import { loadConfig } from "@lumenbazaar/shared";
 
-import { createReadinessService, type ReadinessProbes } from "./readiness.js";
+import {
+  createReadinessService,
+  createRuntimeReadinessProbes,
+  type ReadinessProbes
+} from "./readiness.js";
 
 const succeeds = async () => undefined;
 
@@ -73,6 +77,22 @@ describe("readiness service", () => {
 
     expect(report.ok).toBe(true);
     expect(report.checks.signer.status).toBe("not_required");
+    expect(report.capabilities).toEqual({ exact: false, upto: false });
+  });
+
+  it("keeps live dependency probes out of the test suite", async () => {
+    const runtimeProbes = createRuntimeReadinessProbes(loadConfig({}));
+
+    await expect(runtimeProbes.stellarRpc()).rejects.toThrow(/test suite/i);
+
+    const report = await createReadinessService(
+      loadConfig({}),
+      { exact: true, upto: false },
+      runtimeProbes
+    ).evaluate();
+
+    expect(report.ok).toBe(false);
+    expect(report.checks.stellarRpc.status).toBe("unavailable");
     expect(report.capabilities).toEqual({ exact: false, upto: false });
   });
 });

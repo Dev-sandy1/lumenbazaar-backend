@@ -38,3 +38,56 @@ jobs:
 
       - name: Validate testnet release configuration
         run: pnpm deploy:testnet:check
+
+  payment-persistence:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_INITDB_ARGS: --locale=en_US.UTF-8
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm prisma:generate
+
+      - name: Create the payment persistence database
+        env:
+          PGPASSWORD: postgres
+        run: psql -h localhost -U postgres -d postgres -c "CREATE DATABASE lumenbazaar_payment_test"
+
+      - name: Apply migrations
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/lumenbazaar_payment_test
+        run: pnpm prisma:migrate:deploy
+
+      - name: Run payment persistence integration tests
+        env:
+          PAYMENT_PERSISTENCE_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/lumenbazaar_payment_test
+        run: pnpm payments:persistence:test

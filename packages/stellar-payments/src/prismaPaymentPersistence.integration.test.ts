@@ -37,7 +37,7 @@ describePostgres("Prisma payment persistence", () => {
       network,
       assetCode: "USDC",
       assetIssuer: issuer,
-      amount: "0.0500000",
+      amount: "500000",
       payTo: issuer
     });
     await attemptStore.claimSettlement(attempt.id);
@@ -53,14 +53,17 @@ describePostgres("Prisma payment persistence", () => {
     const restartedReceipts = new PrismaReceiptStore(client);
     await expect(restartedAttempts.getPaymentAttempt(attempt.id)).resolves.toMatchObject({
       correlationId: attempt.correlationId,
+      amount: "500000",
       status: "confirmed"
     });
     await expect(restartedReceipts.getReceipt(result.receipt.id)).resolves.toMatchObject({
       id: result.receipt.id,
       correlationId: attempt.correlationId,
+      amount: "500000",
       transactionHash: "transaction_hash_restart",
       evidenceHash: expect.stringMatching(/^[a-f0-9]{64}$/u)
     });
+    expect(result.settlement.amount).toBe("500000");
     expect(result.settlement.correlationId).toBe(attempt.correlationId);
   });
 
@@ -72,7 +75,7 @@ describePostgres("Prisma payment persistence", () => {
       network,
       assetCode: "USDC",
       assetIssuer: issuer,
-      amount: "0.0500000",
+      amount: "500000",
       payTo: issuer
     });
     await attemptStore.claimSettlement(first.id);
@@ -85,7 +88,7 @@ describePostgres("Prisma payment persistence", () => {
       network,
       assetCode: "USDC",
       assetIssuer: issuer,
-      amount: "0.0500000",
+      amount: "500000",
       payTo: issuer
     });
     await attemptStore.claimSettlement(second.id);
@@ -111,7 +114,7 @@ describePostgres("Prisma payment persistence", () => {
         network,
         assetCode: "USDC",
         assetIssuer: issuer,
-        amount: "0.0500000",
+        amount: "500000",
         payTo: issuer
       })
     ).rejects.toMatchObject({ code: "REPLAY_DETECTED" } satisfies Partial<LumenError>);
@@ -132,7 +135,7 @@ function confirmedSettlement(paymentAttemptId: string, transactionHash: string) 
     transactionHash,
     ledger: 123456,
     network,
-    amount: "0.0500000",
+    amount: "500000",
     assetCode: "USDC",
     assetIssuer: issuer,
     status: "confirmed" as const,

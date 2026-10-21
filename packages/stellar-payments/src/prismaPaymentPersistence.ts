@@ -267,11 +267,18 @@ function receiptData(input: CreateReceiptInput): Prisma.ReceiptUncheckedCreateIn
   };
 }
 
+function mapAmount(value: Prisma.Decimal): string {
+  const [whole = "0", fraction = ""] = value.toFixed().split(".");
+  const trimmedFraction = fraction.replace(/0+$/u, "");
+
+  return trimmedFraction.length === 0 ? whole : `${whole}.${trimmedFraction}`;
+}
+
 function mapPaymentAttempt(row: Prisma.PaymentAttemptGetPayload<object>): PaymentAttempt {
   return {
     ...row,
     network: requireNetwork(row.network),
-    amount: row.amount.toString(),
+    amount: mapAmount(row.amount),
     status: row.status as PaymentAttempt["status"],
     failureCode: row.failureCode as ErrorCode | null,
     createdAt: row.createdAt.toISOString(),
@@ -283,7 +290,7 @@ function mapSettlement(row: Prisma.SettlementGetPayload<object>): Settlement {
   return {
     ...row,
     network: requireNetwork(row.network),
-    amount: row.amount.toString(),
+    amount: mapAmount(row.amount),
     status: row.status as Settlement["status"],
     reconciliationState: row.reconciliationState as Settlement["reconciliationState"],
     reconciliationReason: row.reconciliationReason,
@@ -298,7 +305,7 @@ function mapReceipt(row: Prisma.ReceiptGetPayload<object>): Receipt {
   return {
     ...row,
     network: requireNetwork(row.network),
-    amount: row.amount.toString(),
+    amount: mapAmount(row.amount),
     status: row.status as Receipt["status"],
     failureCode: row.failureCode as ErrorCode | null,
     settledAt: row.settledAt?.toISOString() ?? null,

@@ -154,6 +154,10 @@ export function createRuntimeReadinessProbes(
     throw new Error(`No Stellar network is configured for ${config.lumenEnv}.`);
   }
 
+  if (isTestRuntime()) {
+    return inertProbes();
+  }
+
   return {
     ...(signerProvider === undefined
       ? {}
@@ -248,6 +252,26 @@ async function runProbe(probe: () => Promise<void>): Promise<ReadinessCheck> {
   } catch {
     return unavailable("Dependency check failed.");
   }
+}
+
+function isTestRuntime(): boolean {
+  return process.env.VITEST !== undefined || process.env.NODE_ENV === "test";
+}
+
+function inertProbes(): ReadinessProbes {
+  const disabled = async () => {
+    throw new Error("Live dependency probes are disabled while running the test suite.");
+  };
+
+  return {
+    database: disabled,
+    redis: disabled,
+    stellarRpc: disabled,
+    horizon: disabled,
+    signer: disabled,
+    migrations: disabled,
+    assets: disabled
+  };
 }
 
 function unavailable(detail: string): ReadinessCheck {

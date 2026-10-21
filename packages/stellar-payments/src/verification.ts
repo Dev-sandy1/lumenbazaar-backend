@@ -8,6 +8,7 @@ import {
 import { type VerifyResponse } from "@x402/core/types";
 
 import { computePaymentHash } from "./hash.js";
+import { amountsEqual } from "./amounts.js";
 import {
   type NormalizedVerifyPaymentRequest,
   parseVerifyPaymentRequest
@@ -154,7 +155,7 @@ function existingVerificationResult(
     existing.network !== normalized.network ||
     existing.assetCode !== normalized.asset.code ||
     existing.assetIssuer !== normalized.asset.issuer ||
-    existing.amount !== normalized.amount ||
+    !amountsEqual(existing.amount, normalized.amount) ||
     existing.payTo !== normalized.payTo
   ) {
     throw new LumenError(
