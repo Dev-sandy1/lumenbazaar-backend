@@ -8,7 +8,9 @@ import {
   getReleaseCommit,
   listConfiguredNetworks,
   loadConfig,
-  runWithCorrelationId
+  runWithCorrelationId,
+  runWithTraceparent,
+  startTraceSpan
 } from "@lumenbazaar/shared";
 import {
   PaymentSessionService,
@@ -151,12 +153,31 @@ export function buildApiApp(options: BuildApiAppOptions = {}) {
 
   registerErrorHandling(app);
 
+  const requestSpans = new WeakMap<object, ReturnType<typeof startTraceSpan>>();
   app.addHook("onRequest", (request, reply, done) => {
-    runWithCorrelationId(request.id, () => {
-      reply.header("x-request-id", request.id);
-      reply.header("x-correlation-id", request.id);
-      done();
+    const incomingTraceparent =
+      typeof request.headers.traceparent === "string" ? request.headers.traceparent : undefined;
+    runWithTraceparent(incomingTraceparent, () => {
+      const span = startTraceSpan("http.server.request", {
+        "http.request.method": request.method
+      });
+      requestSpans.set(request, span);
+      runWithCorrelationId(request.id, () => {
+        span.run(() => {
+          if (span.traceparent !== undefined) reply.header("traceparent", span.traceparent);
+          reply.header("x-request-id", request.id);
+          reply.header("x-correlation-id", request.id);
+          done();
+        });
+      });
     });
+  });
+  app.addHook("onResponse", (request, reply, done) => {
+    requestSpans.get(request)?.end({
+      "http.response.status_code": reply.statusCode,
+      "http.route": request.routeOptions.url ?? "unmatched"
+    });
+    done();
   });
 
   const runtimeAuditLog =

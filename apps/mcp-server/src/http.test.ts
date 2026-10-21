@@ -17,9 +17,16 @@ describe("MCP HTTP server", () => {
     const server = await startMcpHttpServer({ host: "127.0.0.1", port: 0 });
 
     try {
-      const response = await fetch(`http://127.0.0.1:${server.port}/health`);
+      const response = await fetch(`http://127.0.0.1:${server.port}/health`, {
+        headers: {
+          traceparent: "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01"
+        }
+      });
 
       expect(response.status).toBe(200);
+      expect(response.headers.get("traceparent")).toMatch(
+        /^00-0123456789abcdef0123456789abcdef-[0-9a-f]{16}-01$/
+      );
       await expect(response.json()).resolves.toMatchObject({
         ok: true,
         app: "mcp-server",
@@ -291,9 +298,11 @@ describe("CORS HTTP integration", () => {
       expect(response.headers.get("access-control-allow-headers")).toMatch(
         /Mcp-Protocol-Version/i
       );
+      expect(response.headers.get("access-control-allow-headers")).toMatch(/traceparent/i);
       expect(response.headers.get("access-control-expose-headers")).toMatch(
         /Mcp-Session-Id/i
       );
+      expect(response.headers.get("access-control-expose-headers")).toMatch(/traceparent/i);
       expect(response.headers.get("access-control-allow-credentials")).toBe("true");
       expect(response.headers.get("access-control-max-age")).toBeTruthy();
     } finally {

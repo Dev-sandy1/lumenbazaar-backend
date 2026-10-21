@@ -1,3 +1,5 @@
+import { getTraceparent } from "@lumenbazaar/shared";
+
 import { BackendError } from "./errors.js";
 import { type McpToolCapabilities } from "./tools.js";
 
@@ -131,8 +133,11 @@ export class BackendClient {
   private async requestJson<T>(path: string): Promise<T> {
     let response: Response;
     try {
+      const headers: Record<string, string> = { accept: "application/json" };
+      const traceparent = getTraceparent();
+      if (traceparent !== undefined) headers.traceparent = traceparent;
       response = await fetch(`${this.baseUrl}${path}`, {
-        headers: { accept: "application/json" },
+        headers,
         signal: AbortSignal.timeout(5_000)
       });
     } catch {

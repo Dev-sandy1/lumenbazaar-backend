@@ -1,10 +1,29 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { runWithTraceparent } from "@lumenbazaar/shared";
+
 import { BackendClient } from "./client.js";
 
 describe("MCP backend client", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it("propagates W3C trace context to backend HTTP requests", async () => {
+    const fetchImpl = vi.fn(async () => Response.json({ ok: true, data: { kinds: [] } }));
+    vi.stubGlobal("fetch", fetchImpl);
+    const traceparent = "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01";
+
+    await runWithTraceparent(traceparent, () =>
+      new BackendClient("https://api.example.test").getSupported()
+    );
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "https://api.example.test/v1/supported",
+      expect.objectContaining({
+        headers: { accept: "application/json", traceparent }
+      })
+    );
   });
 
   it("reads direct network responses from the API", async () => {

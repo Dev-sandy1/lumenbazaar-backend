@@ -21,9 +21,18 @@ describe("API server base", () => {
   it("adds request IDs to responses", async () => {
     const app = buildApiApp({ logger: false });
 
-    const response = await app.inject({ method: "GET", url: "/health" });
+    const response = await app.inject({
+      method: "GET",
+      url: "/health",
+      headers: {
+        traceparent: "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01"
+      }
+    });
 
     expect(response.statusCode).toBe(200);
+    expect(response.headers.traceparent).toMatch(
+      /^00-0123456789abcdef0123456789abcdef-[0-9a-f]{16}-01$/
+    );
     expect(response.headers["x-request-id"]).toBeDefined();
     expect(response.headers["x-correlation-id"]).toBe(response.headers["x-request-id"]);
     expect(response.json()).toMatchObject({
