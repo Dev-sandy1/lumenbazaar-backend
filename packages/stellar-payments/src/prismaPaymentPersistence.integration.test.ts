@@ -5,6 +5,7 @@ import { type LumenError } from "@lumenbazaar/shared";
 
 import {
   PrismaPaymentAttemptStore,
+  PrismaPaymentSessionStore,
   PrismaPaymentStatePersistence,
   PrismaReceiptStore
 } from "./prismaPaymentPersistence.js";
@@ -19,6 +20,8 @@ describePostgres("Prisma payment persistence", () => {
 
   beforeEach(async () => {
     client = createClient();
+    await client.uptoSessionSettlement.deleteMany();
+    await client.paymentSession.deleteMany();
     await client.receipt.deleteMany();
     await client.settlement.deleteMany();
     await client.paymentAttempt.deleteMany();
@@ -115,6 +118,75 @@ describePostgres("Prisma payment persistence", () => {
         payTo: issuer
       })
     ).rejects.toMatchObject({ code: "REPLAY_DETECTED" } satisfies Partial<LumenError>);
+  });
+
+  it("persists payment sessions and settlements across restarts", async () => {
+    const sessionStore = new PrismaPaymentSessionStore(client);
+    const session = await sessionStore.createSession({
+      assetCode: "USDC",
+      assetContractId: "CDLZUSDCTOKENCONTRACT0000000000000000000000000000000000",
+      assetIssuer: issuer,
+      buyer: issuer,
+      capAmount: "10.0000000",
+      contractId: "CDLZUPTOSESSIONCONTRACT000000000000000000000000000000000",
+      contractSessionId: "contract_session_persist_integration_1",
+      expiresAtLedger: 100,
+      ledger: 50,
+      network,
+      payTo: issuer,
+      remainingAmount: "10.0000000",
+      resourceHash: "a".repeat(64),
+      resourceId: null,
+      sellerId: null,
+      spentAmount: "0.0000000",
+      status: "open",
+      transactionHash: "tx_session_create_integration_1",
+      usageHash: null
+    });
+
+    const settlement = await sessionStore.createSettlement({
+      amount: "2.5000000",
+      ledger: 55,
+      network,
+      sessionId: session.id,
+      settledAt: "2026-10-20T12:00:00.000Z",
+      status: "settled",
+      transactionHash: "tx_session_settle_integration_1",
+      usageHash: "b".repeat(64)
+    });
+
+    await client.$disconnect();
+    client = createClient();
+
+    const restartedStore = new PrismaPaymentSessionStore(client);
+    const loadedSession = await restartedStore.getSession(session.id);
+    expect(loadedSession).toMatchObject({
+      id: session.id,
+      contractSessionId: "contract_session_persist_integration_1",
+      capAmount: "10",
+      spentAmount: "0",
+      remainingAmount: "10",
+      status: "open"
+    });
+
+    const loadedByContract = await restartedStore.getSessionByContractSessionId(
+      "contract_session_persist_integration_1"
+    );
+    expect(loadedByContract?.id).toBe(session.id);
+
+    const loadedSettlement = await restartedStore.getSettlement(session.id);
+    expect(loadedSettlement).toMatchObject({
+      id: settlement.id,
+      sessionId: session.id,
+      amount: "2.5",
+      transactionHash: "tx_session_settle_integration_1",
+      ledger: 55
+    });
+
+    const loadedByTxHash = await restartedStore.getSettlementByTransactionHash(
+      "tx_session_settle_integration_1"
+    );
+    expect(loadedByTxHash?.id).toBe(settlement.id);
   });
 });
 

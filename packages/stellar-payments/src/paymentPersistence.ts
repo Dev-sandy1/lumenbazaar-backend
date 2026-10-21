@@ -1,9 +1,11 @@
 import { createPrismaClient, type AppConfig } from "@lumenbazaar/shared";
 
 import { InMemoryPaymentAttemptStore, type PaymentAttemptStore } from "./paymentAttemptStore.js";
+import { InMemoryPaymentSessionStore, type PaymentSessionStore } from "./paymentSession.js";
 import { type PaymentStatePersistence } from "./paymentStatePersistence.js";
 import {
   PrismaPaymentAttemptStore,
+  PrismaPaymentSessionStore,
   PrismaPaymentStatePersistence,
   PrismaReceiptStore,
   PrismaSettlementStore
@@ -15,6 +17,7 @@ export type PaymentPersistenceBundle = {
   attemptStore: PaymentAttemptStore;
   settlementStore: SettlementStore;
   receiptStore: ReceiptStore;
+  paymentSessionStore: PaymentSessionStore;
   statePersistence?: PaymentStatePersistence;
   close: () => Promise<void>;
 };
@@ -25,6 +28,7 @@ export function createPaymentPersistence(config: AppConfig): PaymentPersistenceB
       attemptStore: new InMemoryPaymentAttemptStore(),
       settlementStore: new InMemorySettlementStore(),
       receiptStore: new InMemoryReceiptStore(),
+      paymentSessionStore: new InMemoryPaymentSessionStore(),
       close: async () => undefined
     };
   }
@@ -34,6 +38,7 @@ export function createPaymentPersistence(config: AppConfig): PaymentPersistenceB
     attemptStore: new PrismaPaymentAttemptStore(client),
     settlementStore: new PrismaSettlementStore(client),
     receiptStore: new PrismaReceiptStore(client),
+    paymentSessionStore: new PrismaPaymentSessionStore(client),
     statePersistence: new PrismaPaymentStatePersistence(client),
     close: async () => client.$disconnect()
   };

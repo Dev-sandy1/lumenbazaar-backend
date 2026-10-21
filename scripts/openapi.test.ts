@@ -20,6 +20,13 @@ describe("release artifacts & checksums generator", () => {
     }
 
     expect(resolveTargetCommit(true, "existing-sha-123")).toBe("existing-sha-123");
+
+    process.env.GITHUB_SHA = "ci-runner-sha-456";
+    try {
+      expect(resolveTargetCommit(true, "existing-sha-123")).toBe("existing-sha-123");
+    } finally {
+      delete process.env.GITHUB_SHA;
+    }
   });
 
   it("validates that all published release artifacts match their checksums", async () => {
