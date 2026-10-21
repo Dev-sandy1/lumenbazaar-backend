@@ -25,7 +25,7 @@ export type CreateSettlementInput = {
 export type SettlementStore = {
   createSettlement: (input: CreateSettlementInput) => Promise<Settlement>;
   getSettlementByAttempt: (paymentAttemptId: string) => Promise<Settlement | undefined>;
-  getSettlementByTransactionHash: (transactionHash: string) => Promise<Settlement | undefined>;
+  getSettlementByTransactionHash: (transactionHash: string, network: string) => Promise<Settlement | undefined>;
 };
 
 export class InMemorySettlementStore implements SettlementStore {
@@ -38,7 +38,7 @@ export class InMemorySettlementStore implements SettlementStore {
       throw new LumenError("REPLAY_DETECTED", "Payment attempt has already been settled.");
     }
 
-    if (input.transactionHash !== undefined && this.byTransactionHash.has(input.transactionHash)) {
+    if (input.transactionHash !== undefined && this.byTransactionHash.has(`${input.network}:${input.transactionHash}`)) {
       throw new LumenError("REPLAY_DETECTED", "Settlement transaction hash already exists.");
     }
 
@@ -65,7 +65,7 @@ export class InMemorySettlementStore implements SettlementStore {
     this.byAttempt.set(input.paymentAttemptId, settlement.id);
 
     if (settlement.transactionHash !== null) {
-      this.byTransactionHash.set(settlement.transactionHash, settlement.id);
+      this.byTransactionHash.set(`${settlement.network}:${settlement.transactionHash}`, settlement.id);
     }
 
     return settlement;
@@ -76,8 +76,8 @@ export class InMemorySettlementStore implements SettlementStore {
     return id === undefined ? undefined : this.settlements.get(id);
   }
 
-  async getSettlementByTransactionHash(transactionHash: string) {
-    const id = this.byTransactionHash.get(transactionHash);
+  async getSettlementByTransactionHash(transactionHash: string, network: string) {
+    const id = this.byTransactionHash.get(`${network}:${transactionHash}`);
     return id === undefined ? undefined : this.settlements.get(id);
   }
 }

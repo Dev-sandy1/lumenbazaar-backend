@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import { createCorrelationId, getCorrelationId, type Receipt } from "@lumenbazaar/shared";
+import { createCorrelationId, getCorrelationId, LumenError, type Receipt } from "@lumenbazaar/shared";
 
 export type CreateReceiptInput = Omit<
   Receipt,
@@ -19,6 +19,15 @@ export class InMemoryReceiptStore implements ReceiptStore {
   private readonly byAttempt = new Map<string, string>();
 
   async createReceipt(input: CreateReceiptInput) {
+    const existingId = this.byAttempt.get(input.paymentAttemptId);
+    if (existingId !== undefined) {
+      const existing = this.receipts.get(existingId);
+      if (existing?.status === "finalized") {
+        throw new LumenError("REPLAY_DETECTED", "Finalized receipt evidence cannot be overwritten.");
+      }
+      throw new LumenError("REPLAY_DETECTED", "Payment evidence already exists.");
+    }
+
     const now = new Date().toISOString();
     const receipt: Receipt = {
       id: `receipt_${randomUUID().replaceAll("-", "").slice(0, 24)}`,

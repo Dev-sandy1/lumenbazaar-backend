@@ -106,7 +106,8 @@ describe("Settlement with Horizon Finality Verification", () => {
 
     // Verify settlement record exists in store
     const settlement = await settlementStore.getSettlementByTransactionHash(
-      result.transactionHash
+      result.transactionHash,
+      result.network
     );
     expect(settlement).toBeDefined();
     expect(settlement?.status).toBe("confirmed");
@@ -173,7 +174,7 @@ describe("Settlement with Horizon Finality Verification", () => {
     );
 
     // Verify settlement was recorded with timed_out status
-    const settlement = await settlementStore.getSettlementByTransactionHash("timeout_tx_hash");
+    const settlement = await settlementStore.getSettlementByTransactionHash("timeout_tx_hash", "stellar:testnet");
     expect(settlement?.status).toBe("timed_out");
   });
 
@@ -279,7 +280,8 @@ describe("Settlement with Horizon Finality Verification", () => {
     );
 
     const settlement = await settlementStore.getSettlementByTransactionHash(
-      "failed_verification_tx"
+      "failed_verification_tx",
+      "stellar:testnet"
     );
     expect(settlement?.status).toBe("failed");
   });
